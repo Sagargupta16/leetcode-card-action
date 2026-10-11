@@ -3,10 +3,10 @@
 Render your LeetCode contest rating as an animated SVG card that lives in your own repo.
 
 <p align="center">
-  <img src="examples/leetcode.svg" width="100%" alt="LeetCode card for sagargupta1610: Guardian, rating 2166, top 1.11%, 107 contests, 1322 solved" />
+  <img src="examples/leetcode.svg" width="100%" alt="LeetCode card for sagargupta1610: Guardian, rating 2166, top 1.11%, 107 contests, 1324 solved" />
 </p>
 
-Your rating history draws itself in as a line with the peak marked, next to your badge, rating, top percentage, contest count, solved count and Easy/Medium/Hard progress bars. The preview is live data for [sagargupta1610](https://leetcode.com/u/sagargupta1610/), rendered 2026-09-25.
+Your rating history draws itself in as a line with the peak marked, next to your badge, rating, top percentage, contest count, solved count and Easy/Medium/Hard progress bars. The preview is live data for [sagargupta1610](https://leetcode.com/u/sagargupta1610/), rendered 2026-10-11.
 
 The card is a file in your repo, not an image served by a widget host, so there is no quota to run out and no third-party server to go down.
 
@@ -66,7 +66,7 @@ Or plain Markdown: `![LeetCode contest rating](assets/leetcode.svg)`
 |-------|----------|---------|-------------|
 | `username` | Yes | - | Your LeetCode username, as in `leetcode.com/u/<username>` |
 | `output` | No | `assets/leetcode.svg` | Where to write the SVG, relative to the repository root |
-| `accent` | No | `#f59e0b` | Accent color as `#rgb` or `#rrggbb`: the rating line, the badge line and the heading |
+| `accent` | No | `#f59e0b` | Accent color as `#rgb` or `#rrggbb`: the rating line, the badge line and the heading. A color too dark to read on the card is lightened, keeping its hue, until it reaches 4.5:1 |
 | `title` | No | `LEETCODE CONTEST RATING \| {contests} CONTESTS` | Card heading. `{contests}` becomes the number of rated contests you attended |
 
 If you change `output`, change the path in the commit step to match.

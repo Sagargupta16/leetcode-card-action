@@ -37,7 +37,7 @@ uvx ruff@0.16.6 check .
 uv run --no-project --with pytest==9.1.1 pytest -v
 ```
 
-`test_leetcode_card.py` never touches the network: tests that reach `fetch` monkeypatch it with canned GraphQL bytes shaped like the live responses. It covers the chart path math, peak detection and label placement, every card state, XML validity through `xml.dom.minidom`, escaping, response parsing, the step outputs and the fallback.
+`test_leetcode_card.py` never touches the network: tests that reach `fetch` monkeypatch it with canned GraphQL bytes shaped like the live responses. It covers the chart path math, peak detection and label placement, every card state, XML validity through `xml.dom.minidom`, escaping, WCAG contrast of every color for several accents, response parsing, the step outputs and the fallback.
 
 `.github/workflows/ci.yml` has three jobs on every push to `main` and every PR: `lint` (ruff, 3.13), `test` (pytest, 3.12/3.13/3.14) and `action`, the only job that loads `action.yml`. It runs the action from the checkout against the live profile `sagargupta1610`, parses the SVG and fails if any output is empty. Because `action` calls the real API, a LeetCode outage turns it red while lint and test stay green.
 
@@ -51,7 +51,7 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 ## Key files
 
 - `leetcode_card.py` -- `fetch` (allowlist), `parse_profile`, `chart_points`, `render_chart`, `render_headline`, `render_solved`, `render_card`, `main` (fallback)
-- `examples/leetcode.svg` -- live data for sagargupta1610, rendered 2026-09-25; the README preview
+- `examples/leetcode.svg` -- live data for sagargupta1610, rendered 2026-10-11; the README preview
 
 ## Gotchas
 
@@ -59,7 +59,8 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 - Composite outputs need `value: ${{ steps.card.outputs.<name> }}` and the `id: card` on the step that writes `$GITHUB_OUTPUT`. Without the mapping every output silently resolves to an empty string (credly-badge-readme-action shipped exactly that bug).
 - The default title lives in `action.yml` and in `DEFAULT_TITLE`; keep them identical. `{contests}` is swapped with `str.replace`, not `str.format`, so titles with other braces render as typed instead of crashing.
 - SVG collapses runs of spaces: the brand renderer's `"  |  "` and the default title's `" | "` measure the same (254.53 px in Chrome, 2026-09-25).
-- The chart card matches the brand renderer byte for byte apart from the aria-label, which now names the user (diffed against `brand/Sagargupta16/assets/svg/leetcode.svg` on 2026-09-25). The brand repo keeps its own copy of the renderer, so a design change in one does not reach the other.
+- The chart card matched the brand renderer byte for byte in 1.0.0 apart from the aria-label, which names the user (diffed against `brand/Sagargupta16/assets/svg/leetcode.svg` on 2026-09-25). Since then the profile renders that file with this action (pinned by SHA in its `render-svgs.yml`), so a card change reaches it only when the pin moves.
+- Contrast is a gate: every text color reaches 4.5:1 on `BG` (`MIN_CONTRAST`), large text included, and the rating line, markers and difficulty bars reach 3:1. The tests check both for several accents. Muted labels sit at the lowest alpha that passes (axis labels `rgba(255,255,255,0.45)` at 4.53:1; 0.44 is 4.38:1). `render_card` runs the accent through `readable()`, which keeps a passing accent exactly as typed and otherwise raises its HLS lightness in 0.001 steps until it passes. A 4.5:1 accent also clears 3:1 against its own 0.28 area tint (worst 3.21:1 over 140,608 colors swept on 2026-10-11). Check a card change with svg-forge's `validate_svg.py --strict-contrast`.
 - A chart needs two rated contests. With zero or one, the card drops the chart and shrinks from 270 to 188 px: headline on the left, solved panel at the same `x=600`.
 - The `PEAK` label flips to the right of the point when it would run off the left edge (a user whose first contest was the peak). The brand card never hit this because its peak is the latest contest.
 - LeetCode GraphQL shapes, measured live 2026-09-25: a missing user returns `matchedUser: null` with the error "That user does not exist."; a user with no contests returns `userContestRanking: null` and an empty history; a user without a badge returns `badge: null`.

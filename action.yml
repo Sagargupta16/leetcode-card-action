@@ -15,7 +15,7 @@ inputs:
     required: false
     default: "assets/leetcode.svg"
   accent:
-    description: "Accent color as #rgb or #rrggbb: the rating line, the badge line and the heading"
+    description: "Accent color as #rgb or #rrggbb: the rating line, the badge line and the heading. A color too dark to read on the card is lightened until it reaches 4.5:1 contrast"
     required: false
     default: "#f59e0b"
   title:
