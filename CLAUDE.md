@@ -12,7 +12,7 @@
 
 Composite GitHub Action that renders a self-hosted animated LeetCode card (contest rating history chart with the peak marked, badge, rating, top percentage, contests, solved count, Easy/Medium/Hard bars) into the caller's repo as an SVG, `assets/leetcode.svg` by default.
 
-Extracted from `render_leetcode` in `brand/Sagargupta16/scripts/render-svgs.py` so anyone can use it as `Sagargupta16/leetcode-card-action@v1`. Built locally 2026-09-25; not yet pushed or tagged.
+Extracted from `render_leetcode` in `brand/Sagargupta16/scripts/render-svgs.py` so anyone can use it as `Sagargupta16/leetcode-card-action@v1`. Built 2026-09-25, released as v1.0.0 that day and listed on the Marketplace as "LeetCode Card".
 
 ## Stack
 
@@ -89,4 +89,5 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 
 ## Release
 
-- Not yet done. Publishing is: push `main`, tag `v1.0.0`, point the moving `v1` tag at it, then list it on the Marketplace. The name "LeetCode Card" (slug `leetcode-card`) returned 404 on the Marketplace on 2026-09-25, so it was free that day.
+- Releases: v1.0.0 (2026-09-25), v1.0.1 (2026-10-11). Listed on the Marketplace as "LeetCode Card".
+- A release is: merge the PR, tag `vX.Y.Z` on the merge commit, move the `v1` tag to it (`git tag -f -a v1 -m v1 <sha>`, `git push -f origin v1`), publish the GitHub release from the CHANGELOG entry, then re-pin `Sagargupta16/Sagargupta16/.github/workflows/render-svgs.yml`, which pins a full SHA, not `v1`.
