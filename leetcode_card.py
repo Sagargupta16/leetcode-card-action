@@ -15,6 +15,7 @@ self-contained: no scripts, no external fonts or images, CSS and SMIL only.
 
 from __future__ import annotations
 
+import colorsys
 import itertools
 import json
 import math
@@ -37,6 +38,9 @@ MONO = "'JetBrains Mono','SFMono-Regular',Consolas,'Liberation Mono',Menlo,monos
 SANS = "'Segoe UI',Inter,-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif"
 LC_COLORS = {"Easy": "#00b8a3", "Medium": "#ffc01e", "Hard": "#ef4743"}
 SVG_CLOSE = "</svg>"
+# WCAG 1.4.3 for text under 24 px (18.66 px bold). Every text color on the card meets it,
+# the big badge line included, though 3:1 would do there.
+MIN_CONTRAST = 4.5
 
 W = 840
 CHART_BOX = (40, 540, 70, 220)  # left, right, top, bottom of the rating chart
@@ -117,6 +121,53 @@ def fetch_profile(username: str) -> dict:
     return parse_profile(json.loads(raw), username)
 
 
+def parse_color(color: str) -> tuple[float, float, float, float]:
+    """#rgb, #rrggbb or rgba(r,g,b,a), the forms the card uses, as (r, g, b, alpha)."""
+    if color.startswith("rgba("):
+        r, g, b, a = (float(x) for x in color[5:-1].split(","))
+        return r, g, b, a
+    digits = color.lstrip("#")
+    if len(digits) == 3:
+        digits = "".join(ch * 2 for ch in digits)
+    return int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16), 1.0
+
+
+def luminance(r: float, g: float, b: float) -> float:
+    """WCAG 2.2 relative luminance of an sRGB color with 0 to 255 channels."""
+
+    def linear(v: float) -> float:
+        c = v / 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+    return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+
+
+def contrast(fg: str, bg: str = BG) -> float:
+    """WCAG 2.2 contrast ratio of fg on the opaque bg; a translucent fg is blended over bg first."""
+    *top, alpha = parse_color(fg)
+    *under, _ = parse_color(bg)
+    painted = [t * alpha + u * (1 - alpha) for t, u in zip(top, under, strict=True)]
+    a, b = luminance(*painted), luminance(*under)
+    return (max(a, b) + 0.05) / (min(a, b) + 0.05)
+
+
+def readable(color: str) -> str:
+    """color if text in it reaches MIN_CONTRAST on the card, else the nearest lighter shade that does.
+
+    BG is near black, so only lighter shades gain contrast, and white (19.1:1) always gets there.
+    """
+    if contrast(color) >= MIN_CONTRAST:
+        return color
+    r, g, b, _ = parse_color(color)
+    hue, light, sat = colorsys.rgb_to_hls(r / 255, g / 255, b / 255)
+    shades = (
+        colorsys.hls_to_rgb(hue, min(light + step / 1000, 1.0), sat)
+        for step in range(1, 1001)
+    )
+    hexes = ("#" + "".join(f"{round(v * 255):02x}" for v in rgb) for rgb in shades)
+    return next(h for h in hexes if contrast(h) >= MIN_CONTRAST)
+
+
 def svg_open(w: int, h: int, label: str) -> str:
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" '
@@ -178,7 +229,7 @@ def render_chart(history: list[int], accent: str) -> list[str]:
         y = y1 - (y1 - y0) * frac
         parts.append(
             f'<line x1="{x0}" y1="{y:.1f}" x2="{x1}" y2="{y:.1f}" stroke="rgba(255,255,255,0.06)"/>'
-            f'<text class="m" x="{x1 + 8}" y="{y + 3:.1f}" fill="rgba(255,255,255,0.35)" font-size="8">{round(lo + span * frac)}</text>'
+            f'<text class="m" x="{x1 + 8}" y="{y + 3:.1f}" fill="rgba(255,255,255,0.45)" font-size="8">{round(lo + span * frac)}</text>'
         )
     return [
         *parts,
@@ -235,7 +286,11 @@ def render_solved(x: int, y: int, lc: dict) -> list[str]:
 def render_card(
     lc: dict, username: str, title: str = DEFAULT_TITLE, accent: str = DEFAULT_ACCENT
 ) -> str:
-    """Return the card SVG. A line needs two rated contests; below that the chart is left out."""
+    """Return the card SVG. A line needs two rated contests; below that the chart is left out.
+
+    An accent too dark to read on the card is lightened to the nearest shade that is.
+    """
+    accent = readable(accent)
     chart = len(lc["history"]) >= 2
     h = 270 if chart else 188
     heading = title.replace("{contests}", str(lc["contests"]))

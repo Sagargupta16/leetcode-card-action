@@ -305,6 +305,99 @@ def test_accent_colors_the_title_and_the_rating_line() -> None:
     assert rating_line(root).getAttribute("stroke") == "#60a5fa"
 
 
+# ---------------------------------------------------------------- contrast
+
+# The default, a light one, dark ones in several hues, gray, and both extremes
+ACCENTS = [
+    "#f59e0b",
+    "#60a5fa",
+    "#1e3a8a",
+    "#7c3aed",
+    "#b91c1c",
+    "#555",
+    "#000000",
+    "#ffffff",
+]
+CONTRAST_STATES = {
+    "chart": profile(),
+    "peak-left": profile(history=(1700, 1500, 1600)),
+    "one-contest": profile(history=(1475,), badge="", rating=1475),
+    "no-contests": NO_CONTESTS,
+}
+
+
+def tint(color: str, alpha: float) -> str:
+    """color at alpha over the card background, as the opaque hex a browser paints."""
+    top, under = card.parse_color(color), card.parse_color(card.BG)
+    return "#" + "".join(
+        f"{round(t * alpha + u * (1 - alpha)):02x}"
+        for t, u in zip(top[:3], under[:3], strict=True)
+    )
+
+
+def test_contrast_is_21_for_black_on_white() -> None:
+    assert card.contrast("#000", "#fff") == pytest.approx(21)
+
+
+def test_contrast_blends_a_translucent_color_over_the_card() -> None:
+    # the 1.0.0 axis labels, which svg-forge's validator measured at 3.18:1
+    assert card.contrast("rgba(255,255,255,0.35)") == pytest.approx(3.19, abs=0.01)
+
+
+def test_a_readable_accent_is_kept_as_typed() -> None:
+    assert card.readable("#F59E0B") == "#F59E0B"
+
+
+def test_a_dark_accent_is_lightened_just_enough_to_read() -> None:
+    fixed = card.readable("#1e3a8a")
+
+    assert 4.5 <= card.contrast(fixed) < 4.6
+
+
+@pytest.mark.parametrize("accent", ACCENTS)
+@pytest.mark.parametrize("lc", CONTRAST_STATES.values(), ids=CONTRAST_STATES.keys())
+def test_every_text_color_reaches_4_5_to_1_on_the_card(lc: dict, accent: str) -> None:
+    root = parse(card.render_card(lc, "someone", accent=accent))
+
+    # no text sits on another shape, so the card background is behind all of it
+    fills = {
+        el.getAttribute("fill")
+        for tag in ("text", "tspan")
+        for el in root.getElementsByTagName(tag)
+        if el.getAttribute("fill")
+    }
+
+    assert {
+        f: round(card.contrast(f), 2) for f in fills if card.contrast(f) < 4.5
+    } == {}
+
+
+@pytest.mark.parametrize("accent", ACCENTS)
+def test_rating_line_and_markers_reach_3_to_1(accent: str) -> None:
+    root = parse(card.render_card(profile(), "someone", accent=accent))
+    line = rating_line(root).getAttribute("stroke")
+    top_stop = root.getElementsByTagName("stop")[0]
+    area_top = tint(
+        top_stop.getAttribute("stop-color"),
+        float(top_stop.getAttribute("stop-opacity")),
+    )
+    marks = [
+        c.getAttribute("stroke") or c.getAttribute("fill")
+        for c in root.getElementsByTagName("circle")
+    ]
+
+    # WCAG 1.4.11: the line on the card and on the tinted area right under it
+    assert card.contrast(line) >= 3
+    assert card.contrast(line, area_top) >= 3
+    assert min(card.contrast(m) for m in marks) >= 3
+
+
+def test_difficulty_bars_reach_3_to_1_on_their_track() -> None:
+    track = tint("#ffffff", 0.07)
+
+    assert min(card.contrast(c, track) for c in card.LC_COLORS.values()) >= 3
+
+
 # ---------------------------------------------------------------- parsing
 
 
