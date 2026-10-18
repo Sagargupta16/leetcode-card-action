@@ -10,7 +10,7 @@
 
 ## Project
 
-Composite GitHub Action that renders a self-hosted animated LeetCode card (contest rating history chart with the peak marked, badge, rating, top percentage, contests, solved count, Easy/Medium/Hard bars) into the caller's repo as an SVG, `assets/leetcode.svg` by default.
+Composite GitHub Action that renders a self-hosted animated LeetCode card (contest rating history chart with the peak marked, badge, rating, top percentage, contests, solved count, Easy/Medium/Hard bars, and an optional past-year submission heatmap) into the caller's repo as an SVG, `assets/leetcode.svg` by default, in one of six themes. One run can write several cards (a light and dark pair) from one fetch.
 
 Extracted from `render_leetcode` in `brand/Sagargupta16/scripts/render-svgs.py` so anyone can use it as `Sagargupta16/leetcode-card-action@v1`. Built 2026-09-25, released as v1.0.0 that day and listed on the Marketplace as "LeetCode Card".
 
@@ -28,7 +28,7 @@ Extracted from `render_leetcode` in `brand/Sagargupta16/scripts/render-svgs.py` 
 LEETCODE_USERNAME=sagargupta1610 LEETCODE_OUTPUT=examples/leetcode.svg python leetcode_card.py
 ```
 
-That command also regenerates the README preview. Without `LEETCODE_OUTPUT` it writes `assets/leetcode.svg`, which is gitignored.
+Without `LEETCODE_OUTPUT` it writes `assets/leetcode.svg`, which is gitignored. `python scripts/render_examples.py` regenerates every README preview (`examples/leetcode.svg` and `examples/themes/<theme>.svg`, the latter with the heatmap) from one live fetch and prints the numbers for the alt text.
 
 ## Test
 
@@ -37,9 +37,9 @@ uvx ruff@0.17.1 check .
 uv run --no-project --with pytest==9.1.1 pytest -v
 ```
 
-`test_leetcode_card.py` never touches the network: tests that reach `fetch` monkeypatch it with canned GraphQL bytes shaped like the live responses. It covers the chart path math, peak detection and label placement, every card state, XML validity through `xml.dom.minidom`, escaping, WCAG contrast of every color for several accents, response parsing, the step outputs and the fallback.
+`test_leetcode_card.py` never touches the network: tests that reach `fetch` monkeypatch it with canned GraphQL bytes shaped like the live responses. It covers the chart path math, peak detection and label placement, every card state, XML validity through `xml.dom.minidom`, escaping, WCAG contrast of every color for every theme crossed with several accents, the heatmap window, levels and layout, response parsing, multi-line outputs, the step outputs and the fallback.
 
-`.github/workflows/ci.yml` has three jobs on every push to `main` and every PR: `lint` (ruff, 3.13), `test` (pytest, 3.12/3.13/3.14) and `action`, the only job that loads `action.yml`. It runs the action from the checkout against the live profile `sagargupta1610`, parses the SVG and fails if any output is empty. Because `action` calls the real API, a LeetCode outage turns it red while lint and test stay green.
+`.github/workflows/ci.yml` has three jobs on every push to `main` and every PR: `lint` (ruff, 3.13), `test` (pytest, 3.12/3.13/3.14) and `action`, the only job that loads `action.yml`. It runs the action from the checkout against the live profile `sagargupta1610`, parses the SVG and fails if any output is empty, then runs it again with `heatmap: true` and a `github-dark`/`github-light` output pair and checks both backgrounds and the heatmap label. Because `action` calls the real API, a LeetCode outage turns it red while lint and test stay green.
 
 `ruff==0.17.1` and `pytest==9.1.1` are pinned inline in `ci.yml`: Renovate does not read `run:` text, and ruff 0.16.0 grew its default ruleset from 59 rules to 413. Bump them by hand, after `uvx ruff@<new> check .` passes locally (0.17.1 passed with no changes on 2026-10-18). There is deliberately no `ruff.toml`, so the full default set applies (it flagged ISC004 and FURB122 on the first draft).
 
@@ -50,11 +50,17 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 
 ## Key files
 
-- `leetcode_card.py` -- `fetch` (allowlist), `parse_profile`, `chart_points`, `render_chart`, `render_headline`, `render_solved`, `render_card`, `main` (fallback)
-- `examples/leetcode.svg` -- live data for sagargupta1610, rendered 2026-10-11; the README preview
+- `leetcode_card.py` -- `THEMES`, `fetch` (allowlist), `parse_profile`, `palette` (every color for a theme, contrast-raised), `chart_points`, `render_chart`, `render_headline`, `render_solved`, `activity` and `render_heatmap`, `render_card`, `parse_outputs`, `main` (fallback)
+- `examples/leetcode.svg` -- live data for sagargupta1610, rendered 2026-10-18; the README preview
+- `examples/themes/*.svg` -- one card per theme with the heatmap, same data and date; the README Themes gallery
+- `scripts/render_examples.py` -- regenerates all of `examples/`
 
 ## Gotchas
 
+- Themes: a theme is `bg`, `ink` (RGB for muted labels, gridlines and tracks at partial alpha), `text` and `accent` in `THEMES`. `palette()` derives everything else: accent and difficulty colors go through `readable(color, bg)`, which lightens on dark backgrounds and darkens on light ones; muted labels go through `muted()`, which raises alpha in 0.01 steps until 4.5:1; heatmap shades come from `heat_colors()`, the faintest at the lowest alpha over `bg` that reaches 3:1. `dark` with its default accent reproduces the 1.0 colors exactly, so the default card only changed by the ring delay in 1.1.0 (diffed against origin/main for three accents and three states, 2026-10-18).
+- Heatmap: `userCalendar{submissionCalendar}` is only added to the query when `heatmap` is on. It is a JSON string keyed by UTC-midnight timestamps; on 2026-10-18 it held the past year for sagargupta1610 (97 active days, 212 submissions, max streak 25, matching LeetCode's own `totalActiveDays` and `streak`). The window is 53 week columns, Sunday on top, ending today in UTC, so a heatmap card changes every day. The empty grid is two pattern-filled rects; only active days are `<rect>`s.
+- The peak ring's CSS pulse has `animation-delay:2.6s`. A CSS animation outranks the SMIL-animated `opacity` attribute, so without the delay the ring pulsed from t=0 (measured 0.78 opacity at 0.2s in Chrome before the fix, 0 until 2.6s after).
+- `output` is split into lines by `parse_outputs`; `?theme=<name>` is the only option. On a failed fetch the run warns and exits 0 only if every output exists.
 - Adding an input touches three places: `inputs` in `action.yml`, the step's `env` block, and the `os.environ` read in `main()`.
 - Composite outputs need `value: ${{ steps.card.outputs.<name> }}` and the `id: card` on the step that writes `$GITHUB_OUTPUT`. Without the mapping every output silently resolves to an empty string (credly-badge-readme-action shipped exactly that bug).
 - The default title lives in `action.yml` and in `DEFAULT_TITLE`; keep them identical. `{contests}` is swapped with `str.replace`, not `str.format`, so titles with other braces render as typed instead of crashing.
@@ -84,7 +90,7 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 
 ## Config
 
-- No config file. Everything flows action input -> env var -> script: `LEETCODE_USERNAME` (required), `LEETCODE_OUTPUT`, `LEETCODE_ACCENT`, `LEETCODE_TITLE`.
+- No config file. Everything flows action input -> env var -> script: `LEETCODE_USERNAME` (required), `LEETCODE_OUTPUT`, `LEETCODE_THEME`, `LEETCODE_HEATMAP`, `LEETCODE_ACCENT` (empty means the theme's), `LEETCODE_TITLE`.
 - Outputs written to `$GITHUB_OUTPUT`: `rating`, `badge`, `solved`, `contests`; `rating` and `badge` are empty when the user has none.
 
 ## Release
