@@ -12,7 +12,7 @@ CI (`.github/workflows/ci.yml`) runs three jobs on every push to `main` and ever
 
 - `lint`: `pip install --only-binary :all: ruff==0.17.1`, then `ruff check .` on Python 3.13
 - `test`: `pip install --only-binary :all: pytest==9.1.1`, then `pytest -v` on Python 3.12, 3.13 and 3.14
-- `action`: runs `action.yml` from the checkout against a live LeetCode profile, checks the SVG parses as an accessible `<svg role="img">`, and fails if any of the four outputs is empty
+- `action`: runs `action.yml` from the checkout against a live LeetCode profile, checks the SVG parses as an accessible `<svg role="img">`, and fails if any of the four outputs is empty, then runs it again with `heatmap: true` and a dark and light output pair and checks both cards
 
 Run the first two locally:
 
@@ -29,13 +29,14 @@ To render a card by hand:
 LEETCODE_USERNAME=<username> python leetcode_card.py
 ```
 
-That writes `assets/leetcode.svg`, which is gitignored. If your change alters the card, regenerate the README preview with `LEETCODE_OUTPUT=examples/leetcode.svg`.
+That writes `assets/leetcode.svg`, which is gitignored. If your change alters the card, regenerate every README preview with `python scripts/render_examples.py`.
 
 ## Conventions
 
 - Tests live in `test_leetcode_card.py` at the repo root and never touch the network: tests that reach `fetch` monkeypatch it with canned GraphQL bytes.
 - A new input touches three places: `inputs` in `action.yml`, the step's `env` block, and the `os.environ` read in `main()`. Env vars use the `LEETCODE_` prefix, because Windows already sets `USERNAME`.
-- The default title lives in `action.yml` and in `DEFAULT_TITLE`. Keep them identical.
+- The default title lives in `action.yml` and in `DEFAULT_TITLE`. Keep them identical. The same goes for the theme list in the `theme` input description and `THEMES`.
+- A new theme is four colors in `THEMES`. The contrast tests pick it up automatically; do not hand-pick shades that bypass `palette()`.
 - Composite outputs need `value: ${{ steps.card.outputs.<name> }}` and `id: card` on the step that writes `$GITHUB_OUTPUT`.
 - Keep the script standard library only. Any third-party import breaks every consumer.
 - The SVG stays self-contained: no scripts, external fonts or images; CSS and SMIL only.

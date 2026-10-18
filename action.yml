@@ -11,13 +11,21 @@ inputs:
     description: "Your LeetCode username, as in leetcode.com/u/<username>"
     required: true
   output:
-    description: "Where to write the SVG, relative to the repository root"
+    description: "Where to write the SVG, relative to the repository root. Several paths, one per line, write several cards from one fetch; end a line with ?theme=<name> to give that card its own theme"
     required: false
     default: "assets/leetcode.svg"
-  accent:
-    description: "Accent color as #rgb or #rrggbb: the rating line, the badge line and the heading. A color too dark to read on the card is lightened until it reaches 4.5:1 contrast"
+  theme:
+    description: "Card theme: dark, light, github-dark, github-light, dracula or nord"
     required: false
-    default: "#f59e0b"
+    default: "dark"
+  accent:
+    description: "Accent color as #rgb or #rrggbb: the rating line, the badge line, the heading and the heatmap. Empty uses the theme's accent. A color that does not reach 4.5:1 contrast on the card is lightened (dark themes) or darkened (light themes) until it does"
+    required: false
+    default: ""
+  heatmap:
+    description: "true adds a heatmap of daily submissions over the past year under the card"
+    required: false
+    default: "false"
   title:
     description: "Card heading; {contests} is replaced with the number of rated contests attended"
     required: false
@@ -53,4 +61,6 @@ runs:
         LEETCODE_OUTPUT: ${{ inputs.output }}
         LEETCODE_ACCENT: ${{ inputs.accent }}
         LEETCODE_TITLE: ${{ inputs.title }}
+        LEETCODE_THEME: ${{ inputs.theme }}
+        LEETCODE_HEATMAP: ${{ inputs.heatmap }}
       run: python "${{ github.action_path }}/leetcode_card.py"

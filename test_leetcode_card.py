@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import urllib.error
 from pathlib import Path
@@ -45,8 +46,13 @@ def graphql(
     history: tuple[float, ...] = (1500.2, 1600.7, 1549.6),
     badge: str = "Knight",
     exists: bool = True,
+    calendar: dict[str, int] | None = None,
 ) -> bytes:
-    """A response shaped like the ones leetcode.com/graphql returned on 2026-09-25."""
+    """A response shaped like the ones leetcode.com/graphql returned on 2026-09-25.
+
+    calendar, keyed by UTC-midnight timestamps as strings, is the userCalendar the
+    heatmap query adds (shape measured live on 2026-10-18).
+    """
     ranking = None
     if history:
         ranking = {
@@ -62,6 +68,8 @@ def graphql(
             )
         }
     }
+    if calendar is not None:
+        user["userCalendar"] = {"submissionCalendar": json.dumps(calendar)}
     data = {
         "userContestRanking": ranking if exists else None,
         "userContestRankingHistory": [
@@ -598,3 +606,381 @@ def test_missing_username_fails_before_fetching(
     monkeypatch.setattr(card, "fetch", lambda url, body: pytest.fail("fetched"))
 
     assert card.main() == 1
+
+
+# ---------------------------------------------------------------- themes
+
+
+def test_the_default_theme_keeps_the_1_0_colors() -> None:
+    pal = card.palette()
+
+    assert (pal["bg"], pal["accent"], pal["text"]) == ("#0b1012", "#f59e0b", "#f3f4f6")
+    assert (pal["axis"], pal["sub"], pal["label"]) == (
+        "rgba(255,255,255,0.45)",
+        "rgba(255,255,255,0.55)",
+        "rgba(255,255,255,0.5)",
+    )
+    assert pal["difficulty"] == card.LC_COLORS
+
+
+def test_the_dark_theme_is_the_default_card() -> None:
+    assert card.render_card(profile(), "someone") == card.render_card(
+        profile(), "someone", theme="dark"
+    )
+
+
+def test_each_theme_paints_its_own_background() -> None:
+    for name, theme in card.THEMES.items():
+        root = parse(card.render_card(profile(), "someone", theme=name))
+
+        assert root.getElementsByTagName("rect")[0].getAttribute("fill") == theme["bg"]
+
+
+def test_a_light_accent_is_darkened_on_a_light_theme() -> None:
+    fixed = card.readable("#f59e0b", "#ffffff")
+
+    assert card.contrast("#f59e0b", "#ffffff") < 4.5
+    assert 4.5 <= card.contrast(fixed, "#ffffff") < 4.6
+
+
+def test_the_theme_accent_is_used_when_no_accent_is_given() -> None:
+    root = parse(card.render_card(profile(), "someone", theme="github-light"))
+
+    assert rating_line(root).getAttribute("stroke") == "#0969da"
+
+
+def ink_tint(theme: str, alpha: float) -> str:
+    """The theme's ink at alpha over its background, as an opaque hex."""
+    rgb = "#" + "".join(f"{int(c):02x}" for c in card.THEMES[theme]["ink"].split(","))
+    return card.blend(rgb, card.THEMES[theme]["bg"], alpha)
+
+
+@pytest.mark.parametrize("theme", card.THEMES)
+@pytest.mark.parametrize("accent", [None, *ACCENTS])
+def test_every_theme_reaches_wcag_contrast(theme: str, accent: str | None) -> None:
+    bg = card.THEMES[theme]["bg"]
+    lc = dict(profile(), calendar={dt.date(2026, 10, 1): 3, dt.date(2026, 10, 2): 9})
+    root = parse(
+        card.render_card(lc, "someone", accent=accent, theme=theme, today=TODAY)
+    )
+    pal = card.palette(theme, accent)
+    fills = {
+        el.getAttribute("fill")
+        for tag in ("text", "tspan")
+        for el in root.getElementsByTagName(tag)
+        if el.getAttribute("fill")
+    }
+    track = ink_tint(theme, 0.07)
+
+    # WCAG 1.4.3 for text, 1.4.11 for the line, the bars on their track and every heat level
+    assert {
+        f: round(card.contrast(f, bg), 2) for f in fills if card.contrast(f, bg) < 4.5
+    } == {}
+    assert card.contrast(rating_line(root).getAttribute("stroke"), bg) >= 3
+    assert min(card.contrast(c, track) for c in pal["difficulty"].values()) >= 3
+    assert min(card.contrast(c, bg) for c in pal["heat"]) >= 3
+
+
+# ---------------------------------------------------------------- peak ring timing
+
+
+def test_the_peak_ring_pulse_waits_for_the_ring_to_appear() -> None:
+    svg = card.render_card(profile(), "someone")
+
+    assert ".ring{animation:ring 2.2s ease-out 2.6s infinite" in svg
+    assert '<set attributeName="opacity" to="1" begin="2.6s"' in svg
+
+
+# ---------------------------------------------------------------- heatmap
+
+TODAY = dt.date(2026, 10, 14)  # a Wednesday
+
+
+def heatmap_card(calendar: dict[dt.date, int], **kw: object) -> minidom.Element:
+    lc = dict(profile(**kw), calendar=calendar)
+    return parse(card.render_card(lc, "someone", today=TODAY))
+
+
+def cells(root: minidom.Element) -> list[minidom.Element]:
+    return [
+        r
+        for r in root.getElementsByTagName("rect")
+        if r.getAttribute("class").startswith("l")
+    ]
+
+
+def test_the_window_starts_on_a_sunday_52_weeks_before_this_week() -> None:
+    act = card.activity({}, TODAY)
+
+    assert act["start"] == dt.date(2025, 10, 12)
+    assert act["start"].weekday() == 6  # Sunday
+    assert len(act["counts"]) == 52 * 7 + 4  # then Sunday to Wednesday of this week
+
+
+def test_activity_counts_only_the_window() -> None:
+    calendar = {
+        dt.date(2025, 10, 11): 50,  # the Saturday before the window
+        dt.date(2025, 10, 12): 2,
+        dt.date(2026, 10, 13): 1,
+        dt.date(2026, 10, 14): 4,
+        dt.date(2026, 10, 15): 7,  # tomorrow
+    }
+
+    act = card.activity(calendar, TODAY)
+
+    assert (act["total"], act["active"], act["streak"]) == (7, 3, 2)
+
+
+def test_the_streak_is_the_longest_run_of_active_days() -> None:
+    days = [dt.date(2026, 3, 1) + dt.timedelta(days=d) for d in (0, 1, 2, 4, 5)]
+
+    act = card.activity(dict.fromkeys(days, 1), TODAY)
+
+    assert act["streak"] == 3
+
+
+@pytest.mark.parametrize(
+    ("count", "peak", "level"),
+    [(1, 1, 4), (1, 16, 1), (2, 16, 2), (5, 16, 3), (9, 16, 4), (16, 16, 4)],
+)
+def test_heat_levels_follow_a_log_scale(count: int, peak: int, level: int) -> None:
+    assert card.heat_level(count, peak) == level
+
+
+def test_heatmap_draws_one_cell_per_active_day() -> None:
+    calendar = {dt.date(2026, 1, 5): 5, dt.date(2026, 1, 6): 1, TODAY: 16}
+
+    root = heatmap_card(calendar)
+
+    assert len(cells(root)) == 3
+    assert {c.getAttribute("class") for c in cells(root)} == {"l1", "l3", "l4"}
+
+
+def test_todays_cell_sits_in_the_last_column_on_its_weekday_row() -> None:
+    root = heatmap_card({TODAY: 1})
+
+    (cell,) = cells(root)
+    grid_top = 270 - 24 + 54
+
+    assert cell.getAttribute("x") == str(24 + 52 * 15)
+    assert cell.getAttribute("y") == str(grid_top + 3 * 15)  # Wednesday is row 3
+
+
+def test_heatmap_spans_the_card_margins() -> None:
+    root = heatmap_card({})
+    full, current = (
+        r
+        for r in root.getElementsByTagName("rect")
+        if r.getAttribute("fill") == "url(#day)"
+    )
+
+    right = int(current.getAttribute("x")) + int(current.getAttribute("width"))
+
+    assert (full.getAttribute("x"), right) == ("24", 816)
+    assert current.getAttribute("height") == str(4 * 15 - 3)  # Sunday to Wednesday
+
+
+def test_heatmap_shows_the_year_totals() -> None:
+    root = heatmap_card({dt.date(2026, 10, 12): 1, dt.date(2026, 10, 13): 2})
+
+    shown = texts(root)
+
+    assert "3 SUBMISSIONS IN THE PAST YEAR" in shown
+    assert "2 ACTIVE DAYS  |  MAX STREAK 2" in shown
+    assert root.getAttribute("aria-label").endswith(", 3 submissions in the past year")
+
+
+def test_heatmap_uses_the_singular_for_one() -> None:
+    shown = texts(heatmap_card({TODAY: 1}))
+
+    assert "1 SUBMISSION IN THE PAST YEAR" in shown
+    assert "1 ACTIVE DAY  |  MAX STREAK 1" in shown
+
+
+def test_heatmap_labels_the_months() -> None:
+    months = [t for t in texts(heatmap_card({})) if t in card.MONTHS]
+
+    assert months == [
+        "NOV",
+        "DEC",
+        "JAN",
+        "FEB",
+        "MAR",
+        "APR",
+        "MAY",
+        "JUN",
+        "JUL",
+        "AUG",
+        "SEP",
+        "OCT",
+    ]
+
+
+def test_heatmap_makes_the_card_taller() -> None:
+    no_contests = heatmap_card({}, history=(), badge="", rating=None, top=None)
+
+    assert heatmap_card({}).getAttribute("height") == "422"
+    assert no_contests.getAttribute("height") == "340"
+
+
+def test_an_empty_year_still_draws_the_grid() -> None:
+    root = heatmap_card({})
+
+    assert cells(root) == []
+    assert "0 SUBMISSIONS IN THE PAST YEAR" in texts(root)
+
+
+def test_no_calendar_means_no_heatmap() -> None:
+    svg = card.render_card(profile(), "someone")
+
+    assert "url(#day)" not in svg
+    assert "PAST YEAR" not in svg
+
+
+def test_heatmap_card_is_self_contained() -> None:
+    lc = dict(profile(), calendar={TODAY: 2})
+    svg = card.render_card(lc, "someone", today=TODAY)
+
+    assert "<script" not in svg
+    assert "href" not in svg
+
+
+def test_the_query_asks_for_the_calendar_only_for_a_heatmap() -> None:
+    query = card.leetcode_query(heatmap=True)
+
+    assert "userCalendar" not in card.leetcode_query()
+    assert "userCalendar{submissionCalendar}" in query
+    assert query.count("{") == query.count("}")
+
+
+def test_parse_profile_reads_the_calendar_by_utc_date() -> None:
+    # 1760313600 is 2025-10-13 00:00 UTC
+    payload = json.loads(graphql(calendar={"1760313600": 4}))
+
+    lc = card.parse_profile(payload, "someone")
+
+    assert lc["calendar"] == {dt.date(2025, 10, 13): 4}
+
+
+def test_parse_profile_has_no_calendar_unless_asked() -> None:
+    assert "calendar" not in card.parse_profile(json.loads(graphql()), "someone")
+
+
+def test_a_null_calendar_reads_as_an_empty_year() -> None:
+    payload = json.loads(graphql(calendar={}))
+    payload["data"]["matchedUser"]["userCalendar"] = None
+
+    assert card.parse_profile(payload, "someone")["calendar"] == {}
+
+
+# ---------------------------------------------------------------- several outputs
+
+
+def test_one_output_line_uses_the_default_theme() -> None:
+    assert card.parse_outputs("assets/leetcode.svg", "nord") == [
+        (Path("assets/leetcode.svg"), "nord")
+    ]
+
+
+def test_each_output_line_can_pick_its_theme() -> None:
+    raw = "\n  assets/dark.svg \nassets/light.svg ?theme=github-light\n\n"
+
+    assert card.parse_outputs(raw, "dark") == [
+        (Path("assets/dark.svg"), "dark"),
+        (Path("assets/light.svg"), "github-light"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("raw", "theme", "message"),
+    [
+        ("a.svg?theme=solarized", "dark", "unknown theme 'solarized'"),
+        ("a.svg", "pink", "unknown theme 'pink'"),
+        ("a.svg?palette=dark", "dark", "unknown option 'palette'"),
+        (" \n ", "dark", "output is empty"),
+    ],
+)
+def test_bad_outputs_are_rejected(raw: str, theme: str, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        card.parse_outputs(raw, theme)
+
+
+def test_main_writes_every_output_in_its_theme(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, _ = paths
+    light = out.with_name("leetcode-light.svg")
+    monkeypatch.setenv("LEETCODE_OUTPUT", f"{out}\n{light}?theme=light")
+    monkeypatch.setattr(card, "fetch", lambda url, body: graphql())
+
+    assert card.main() == 0
+    for path, theme in ((out, "dark"), (light, "light")):
+        root = parse(path.read_text(encoding="utf-8"))
+        bg = root.getElementsByTagName("rect")[0].getAttribute("fill")
+        assert bg == card.THEMES[theme]["bg"]
+
+
+def test_main_asks_for_the_calendar_when_heatmap_is_on(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, _ = paths
+    sent = []
+
+    def answer(url: str, body: dict) -> bytes:
+        sent.append(body["query"])
+        return graphql(calendar={"1760313600": 4})
+
+    monkeypatch.setenv("LEETCODE_HEATMAP", "True")
+    monkeypatch.setattr(card, "fetch", answer)
+
+    assert card.main() == 0
+    assert "userCalendar" in sent[0]
+    assert "PAST YEAR" in out.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("LEETCODE_HEATMAP", "yes"),
+        ("LEETCODE_THEME", "solarized"),
+        ("LEETCODE_OUTPUT", "a.svg?x=1"),
+    ],
+)
+def test_bad_options_fail_before_fetching(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    monkeypatch.setattr(card, "fetch", lambda url, body: pytest.fail("fetched"))
+
+    assert card.main() == 1
+
+
+def test_failed_fetch_fails_when_any_output_is_missing(
+    paths: tuple[Path, Path],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out, _ = paths
+    light = out.with_name("leetcode-light.svg")
+    out.parent.mkdir(parents=True)
+    out.write_text("<svg/>", encoding="utf-8")
+    monkeypatch.setenv("LEETCODE_OUTPUT", f"{out}\n{light}?theme=light")
+    monkeypatch.setattr(card, "fetch", offline)
+
+    assert card.main() == 1
+    assert f"there is no {light} to keep" in capsys.readouterr().out
+    assert out.read_text(encoding="utf-8") == "<svg/>"
+
+
+def test_failed_fetch_keeps_every_existing_output(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, _ = paths
+    light = out.with_name("leetcode-light.svg")
+    out.parent.mkdir(parents=True)
+    for path in (out, light):
+        path.write_text("<svg/>", encoding="utf-8")
+    monkeypatch.setenv("LEETCODE_OUTPUT", f"{out}\n{light}?theme=light")
+    monkeypatch.setattr(card, "fetch", offline)
+
+    assert card.main() == 0

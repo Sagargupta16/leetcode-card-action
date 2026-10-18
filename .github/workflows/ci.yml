@@ -83,3 +83,29 @@ jobs:
             fi
           done
           echo "The card parses and all four outputs resolved."
+
+      - name: Run the action with a heatmap and a light and dark pair
+        uses: ./
+        with:
+          username: sagargupta1610
+          theme: github-dark
+          heatmap: true
+          output: |
+            assets/leetcode-dark.svg
+            assets/leetcode-light.svg?theme=github-light
+
+      - name: Assert both themed cards parse and carry the heatmap
+        run: |
+          set -euo pipefail
+          python - assets/leetcode-dark.svg assets/leetcode-light.svg <<'PY'
+          import sys
+          from xml.dom import minidom
+
+          for path, bg in zip(sys.argv[1:], ("#0d1117", "#ffffff"), strict=True):
+              root = minidom.parse(path).documentElement
+              fill = root.getElementsByTagName("rect")[0].getAttribute("fill")
+              label = root.getAttribute("aria-label")
+              if fill != bg or "submissions in the past year" not in label:
+                  sys.exit(f"{path}: background {fill}, label {label!r}")
+              print(f"{path} parses: {label}")
+          PY
