@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The peak ring pulsed from the first frame, before the rating line reached it: its CSS animation overrode the SMIL `set` that reveals it at 2.6s. The pulse now starts at 2.6s (measured in Chrome: opacity 0 until 2.6s, where it was 0.78 at 0.2s). Apart from that delay, the default card is byte for byte the 1.0.2 card.
+
 ## [1.0.2] - 2026-10-18
 
 ### Changed

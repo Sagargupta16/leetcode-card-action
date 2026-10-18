@@ -565,6 +565,7 @@ def parse_outputs(raw: str, default_theme: str) -> list[tuple[Path, str]]:
     outputs = []
     for line in raw.splitlines():
         path, _, query = line.strip().partition("?")
+        path = path.rstrip()
         if not path:
             continue
         theme = default_theme

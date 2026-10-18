@@ -883,7 +883,7 @@ def test_one_output_line_uses_the_default_theme() -> None:
 
 
 def test_each_output_line_can_pick_its_theme() -> None:
-    raw = "\n  assets/dark.svg \nassets/light.svg?theme=github-light\n\n"
+    raw = "\n  assets/dark.svg \nassets/light.svg ?theme=github-light\n\n"
 
     assert card.parse_outputs(raw, "dark") == [
         (Path("assets/dark.svg"), "dark"),
