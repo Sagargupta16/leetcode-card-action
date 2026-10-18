@@ -33,7 +33,7 @@ That command also regenerates the README preview. Without `LEETCODE_OUTPUT` it w
 ## Test
 
 ```
-uvx ruff@0.16.6 check .
+uvx ruff@0.17.1 check .
 uv run --no-project --with pytest==9.1.1 pytest -v
 ```
 
@@ -41,7 +41,7 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 
 `.github/workflows/ci.yml` has three jobs on every push to `main` and every PR: `lint` (ruff, 3.13), `test` (pytest, 3.12/3.13/3.14) and `action`, the only job that loads `action.yml`. It runs the action from the checkout against the live profile `sagargupta1610`, parses the SVG and fails if any output is empty. Because `action` calls the real API, a LeetCode outage turns it red while lint and test stay green.
 
-`ruff==0.16.6` and `pytest==9.1.1` are pinned inline in `ci.yml`: Renovate does not read `run:` text, and ruff 0.16.0 grew its default ruleset from 59 rules to 413. Bump them by hand. There is deliberately no `ruff.toml`, so the full default set applies (it flagged ISC004 and FURB122 on the first draft).
+`ruff==0.17.1` and `pytest==9.1.1` are pinned inline in `ci.yml`: Renovate does not read `run:` text, and ruff 0.16.0 grew its default ruleset from 59 rules to 413. Bump them by hand, after `uvx ruff@<new> check .` passes locally (0.17.1 passed with no changes on 2026-10-18). There is deliberately no `ruff.toml`, so the full default set applies (it flagged ISC004 and FURB122 on the first draft).
 
 ## Entry points
 
