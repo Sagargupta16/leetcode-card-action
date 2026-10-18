@@ -1,5 +1,10 @@
 # LeetCode Card
 
+[![CI](https://github.com/Sagargupta16/leetcode-card-action/actions/workflows/ci.yml/badge.svg)](https://github.com/Sagargupta16/leetcode-card-action/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Sagargupta16/leetcode-card-action)](https://github.com/Sagargupta16/leetcode-card-action/releases/latest)
+[![Marketplace](https://img.shields.io/badge/Marketplace-LeetCode%20Card-orange?logo=github)](https://github.com/marketplace/actions/leetcode-card)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Render your LeetCode contest rating as an animated SVG card that lives in your own repo.
 
 <p align="center">
@@ -95,6 +100,29 @@ The card adapts to your profile:
 - **Fewer than two:** a shorter card without the chart, since a line needs two points. The badge line reads "No contests yet" when there are none.
 - **No badge:** the badge line shows your rating instead.
 
+### Flow
+
+```mermaid
+flowchart LR
+    trigger["Your workflow<br/>(schedule or manual)"] --> action["action.yml<br/>composite, Python 3.13"]
+    action --> script["leetcode_card.py<br/>stdlib only"]
+    script -->|"one GraphQL POST"| api[("leetcode.com/graphql")]
+    api --> script
+    script -->|"ok"| render["parse_profile, render_card<br/>write SVG, set outputs"]
+    script -->|"failed, card exists"| keep["keep the old card<br/>warning, exit 0"]
+    script -->|"failed, no card yet"| fail["error, exit 1"]
+    render --> commit["your commit step<br/>commits only if bytes changed"]
+```
+
+### Design decisions
+
+- **Self-hosted, not a widget.** A hosted card is an image someone else's server builds and serves, with that server's uptime and rate limits. This one renders once a day in your Actions run and is served by GitHub like any other file in your repo.
+- **Standard library only.** `action.yml` installs Python and nothing else, so there is no dependency to resolve, cache or break on a consumer's runner.
+- **Deterministic output.** The same numbers give the same bytes, so the commit step only commits when your profile actually changed.
+- **Fail soft.** LeetCode's API is unofficial. A bad day keeps yesterday's card instead of blanking your README.
+- **Readable by default.** Every text color reaches WCAG 4.5:1 on the card and the chart line reaches 3:1, enforced by tests for several accents. A custom `accent` that is too dark is lightened until it passes.
+- **Locked-down fetch.** Requests go only to `https://leetcode.com/`; every string from the API is HTML-escaped before it reaches the SVG, and the accent is regex-validated.
+
 ## Limits
 
 - LeetCode's GraphQL API is unofficial and undocumented. It can change shape, rate-limit or block runners without notice. When it does, your last card stays up and the run warns.
@@ -103,6 +131,23 @@ The card adapts to your profile:
 - The card is 840 px wide and scales down with the page, so on a phone its smallest labels get small.
 - Fonts come from the viewer's system (JetBrains Mono or Consolas, Segoe UI or Inter or the system UI font), so text renders slightly differently across operating systems.
 - The action writes the file and nothing else. Committing it is up to your workflow, as in the Quick start.
+
+## Development
+
+The script runs on its own, outside Actions:
+
+```bash
+LEETCODE_USERNAME=your-leetcode-username python leetcode_card.py
+```
+
+That writes `assets/leetcode.svg` (gitignored). Lint and tests, at the versions CI pins:
+
+```bash
+uvx ruff@0.17.1 check .
+uv run --no-project --with pytest==9.1.1 pytest -v
+```
+
+The tests never touch the network. CI also runs `action.yml` itself against a live profile and fails if the SVG does not parse or any output is empty. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions.
 
 ## License
 

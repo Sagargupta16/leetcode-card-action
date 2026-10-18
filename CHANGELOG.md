@@ -5,6 +5,13 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-10-18
+
+### Changed
+
+- README: CI, release, Marketplace and license badges, a flow diagram of one run, the design decisions behind the action, and a Development section with the local lint and test commands.
+- CI lints with ruff 0.17.1 (was 0.16.6). The tree passes it unchanged; CONTRIBUTING.md and CLAUDE.md name the new pin.
+
 ## [1.0.1] - 2026-10-11
 
 ### Fixed
@@ -31,5 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fallback when LeetCode fails: the existing card is kept and the run warns. The step fails only when there is no card to keep yet.
 - CI: ruff, pytest on Python 3.12, 3.13 and 3.14, and a job that runs `action.yml` against a live profile.
 
+[1.0.2]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.0.2
 [1.0.1]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.0.1
 [1.0.0]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.0.0
