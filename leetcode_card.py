@@ -364,15 +364,16 @@ def render_chart(history: list[int], pal: dict) -> list[str]:
     lx, ly = pts[-1]
     label = f"PEAK {hi}"
     # The label ends just left of the peak, unless that runs off the card's left edge
+    # (7.5 px a character: 10.5 px mono with the card's 1.2 px tracking)
     tx, anchor = (
-        (px - 6, "end") if px - 6 - len(label) * 6.6 >= 12 else (px + 6, "start")
+        (px - 6, "end") if px - 6 - len(label) * 7.5 >= 12 else (px + 6, "start")
     )
     parts = []
     for frac in (0, 0.5, 1):
         y = y1 - (y1 - y0) * frac
         parts.append(
             f'<line x1="{x0}" y1="{y:.1f}" x2="{x1}" y2="{y:.1f}" stroke="{pal["grid"]}"/>'
-            f'<text class="m" x="{x1 + 8}" y="{y + 3:.1f}" fill="{pal["axis"]}" font-size="8">{round(lo + span * frac)}</text>'
+            f'<text class="m" x="{x1 + 8}" y="{y + 3:.1f}" fill="{pal["axis"]}" font-size="10.5">{round(lo + span * frac)}</text>'
         )
     return [
         *parts,
@@ -387,7 +388,7 @@ def render_chart(history: list[int], pal: dict) -> list[str]:
         ),
         f'<circle cx="{lx:.1f}" cy="{ly:.1f}" r="4" fill="{accent}" opacity="0"><set attributeName="opacity" to="1" begin="2.6s" fill="freeze"/></circle>',
         (
-            f'<text class="m" x="{tx:.1f}" y="{py - 12:.1f}" text-anchor="{anchor}" fill="{accent}" font-size="9" opacity="0">{label}'
+            f'<text class="m" x="{tx:.1f}" y="{py - 12:.1f}" text-anchor="{anchor}" fill="{accent}" font-size="10.5" opacity="0">{label}'
             '<set attributeName="opacity" to="1" begin="2.6s" fill="freeze"/></text>'
         ),
     ]
@@ -400,7 +401,7 @@ def render_headline(x: int, y: int, lc: dict, pal: dict) -> list[str]:
     ]
     if sub:
         parts.append(
-            f'<text class="m" x="{x}" y="{y + 20}" fill="{pal["sub"]}" font-size="9">{escape(sub)}</text>'
+            f'<text class="m" x="{x}" y="{y + 20}" fill="{pal["sub"]}" font-size="10.5">{escape(sub)}</text>'
         )
     return parts
 
@@ -410,7 +411,7 @@ def render_solved(x: int, y: int, lc: dict, pal: dict) -> list[str]:
     parts = [
         (
             f'<text class="v" x="{x}" y="{y}" fill="{pal["text"]}" font-size="22">{lc["solved"]:,}'
-            f'<tspan class="m" font-size="9" fill="{pal["label"]}">  SOLVED</tspan></text>'
+            f'<tspan class="m" font-size="10.5" fill="{pal["label"]}">  SOLVED</tspan></text>'
         )
     ]
     for j, (level, (done, total)) in enumerate(lc["by_difficulty"].items()):
@@ -418,8 +419,8 @@ def render_solved(x: int, y: int, lc: dict, pal: dict) -> list[str]:
         bar = 200 * (done / total if total else 0)
         color = pal["difficulty"][level]
         parts.append(
-            f'<text class="m" x="{x}" y="{by}" fill="{color}" font-size="8.5">{level.upper()}</text>'
-            f'<text class="m" x="{x + 200}" y="{by}" text-anchor="end" fill="{pal["label"]}" font-size="8.5">{done}/{total}</text>'
+            f'<text class="m" x="{x}" y="{by}" fill="{color}" font-size="10.5">{level.upper()}</text>'
+            f'<text class="m" x="{x + 200}" y="{by}" text-anchor="end" fill="{pal["label"]}" font-size="10.5">{done}/{total}</text>'
             f'<rect x="{x}" y="{by + 5}" width="200" height="5" rx="2.5" fill="{pal["track"]}"/>'
             f'<rect x="{x}" y="{by + 5}" width="{bar:.1f}" height="5" rx="2.5" fill="{color}" transform="scale(0 1)" style="transform-origin:{x}px 0">'
             f'<animateTransform attributeName="transform" type="scale" from="0 1" to="1 1" begin="{0.6 + j * 0.2:.1f}s" dur="0.9s" fill="freeze"/></rect>'
@@ -467,8 +468,8 @@ def render_heatmap(act: dict, top: int, pal: dict) -> list[str]:
     stats = f"{plural(act['active'], 'ACTIVE DAY')}  |  MAX STREAK {act['streak']:,}"
     parts = [
         f'<line x1="{HEATMAP_X}" y1="{top}" x2="{right}" y2="{top}" stroke="{pal["grid"]}"/>',
-        f'<text class="m" x="{HEATMAP_X}" y="{top + 26}" fill="{pal["label"]}" font-size="9">{plural(act["total"], "SUBMISSION")} IN THE PAST YEAR</text>',
-        f'<text class="m" x="{right}" y="{top + 26}" text-anchor="end" fill="{pal["label"]}" font-size="9">{stats}</text>',
+        f'<text class="m" x="{HEATMAP_X}" y="{top + 26}" fill="{pal["label"]}" font-size="10.5">{plural(act["total"], "SUBMISSION")} IN THE PAST YEAR</text>',
+        f'<text class="m" x="{right}" y="{top + 26}" text-anchor="end" fill="{pal["label"]}" font-size="10.5">{stats}</text>',
     ]
     last_label = -3
     for week in range(weeks):
@@ -476,7 +477,7 @@ def render_heatmap(act: dict, top: int, pal: dict) -> list[str]:
         month_start = next((day for day in days if day.day == 1), None)
         if month_start and week - last_label >= 3:
             parts.append(
-                f'<text class="m" x="{HEATMAP_X + week * HEATMAP_PITCH}" y="{top + 46}" fill="{pal["axis"]}" font-size="8">{MONTHS[month_start.month - 1]}</text>'
+                f'<text class="m" x="{HEATMAP_X + week * HEATMAP_PITCH}" y="{top + 46}" fill="{pal["axis"]}" font-size="10.5">{MONTHS[month_start.month - 1]}</text>'
             )
             last_label = week
     # The empty grid is two pattern-filled rects, the full weeks and the current one, so
@@ -545,7 +546,7 @@ def render_card(
             f'<stop offset="1" stop-color="{pal["accent"]}" stop-opacity="0"/></linearGradient></defs>'
         ),
         f'<rect x="0.5" y="0.5" width="{W - 1}" height="{h - 1}" rx="14" fill="{pal["bg"]}" stroke="{pal["border"]}"/>',
-        f'<text class="m" x="24" y="32" fill="{pal["accent"]}" font-size="10">{escape(heading)}</text>',
+        f'<text class="m" x="24" y="32" fill="{pal["accent"]}" font-size="10.5">{escape(heading)}</text>',
     ]
     if chart:
         parts += render_chart(lc["history"], pal)

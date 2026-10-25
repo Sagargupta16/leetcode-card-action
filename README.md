@@ -8,7 +8,7 @@
 Render your LeetCode contest rating as an animated SVG card that lives in your own repo.
 
 <p align="center">
-  <img src="examples/leetcode.svg" width="100%" alt="LeetCode card for sagargupta1610: Guardian, rating 2166, top 1.11%, 107 contests, 1328 solved" />
+  <img src="examples/leetcode.svg" width="100%" alt="LeetCode card for sagargupta1610: Guardian, rating 2166, top 1.11%, 107 contests, 1330 solved" />
 </p>
 
 Your rating history draws itself in as a line with the peak marked, next to your badge, rating, top percentage, contest count, solved count and Easy/Medium/Hard progress bars. Turn on `heatmap` and a year of daily submissions sweeps in under it. Pick one of six themes, or have one run write a dark and a light card for a `<picture>` that follows the reader's GitHub theme. The previews are live data for [sagargupta1610](https://leetcode.com/u/sagargupta1610/), rendered 2026-10-18.

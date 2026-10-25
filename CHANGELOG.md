@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-10-25
+
+### Changed
+
+- No text on the card is under 10.5 px. The title, chart axis, `PEAK` label, the line under the badge, the `SOLVED` tag, the Easy/Medium/Hard rows and the heatmap's labels and months were 8 to 10 px; on an 840 px card in an 831 px README column they read at about 7.9 px. A 10.5 px label holds 10.4 px there. Card sizes are unchanged (840 x 270, 840 x 422 with the heatmap).
+- The `PEAK` label's placement estimate is 7.5 px a character to match, so the check that flips it right of the point near the left edge still holds.
+- Checked in a browser on five themes (121 texts): no text crosses the card edge and no two labels overlap. svg-forge's `validate_svg.py --strict-contrast` reports 0 errors on all seven examples, which are re-rendered from live data.
+
 ## [1.1.0] - 2026-10-18
 
 ### Added
