@@ -51,7 +51,7 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 ## Key files
 
 - `leetcode_card.py` -- `THEMES`, `fetch` (allowlist), `parse_profile`, `palette` (every color for a theme, contrast-raised), `chart_points`, `render_chart`, `render_headline`, `render_solved`, `activity` and `render_heatmap`, `render_card`, `parse_outputs`, `main` (fallback)
-- `examples/leetcode.svg` -- live data for sagargupta1610, rendered 2026-10-18; the README preview
+- `examples/leetcode.svg` -- live data for sagargupta1610, rendered 2026-10-25; the README preview
 - `examples/themes/*.svg` -- one card per theme with the heatmap, same data and date; the README Themes gallery
 - `scripts/render_examples.py` -- regenerates all of `examples/`
 
@@ -73,6 +73,7 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 - Every fetch failure (network, HTTP, bad JSON, missing user, changed shape) goes through `FETCH_ERRORS` into one fallback: keep the existing file and exit 0 with `::warning::`, or exit 1 with `::error::` when there is no file yet. Outputs are only written on success.
 - Any non-empty `errors` in a response for an existing user also counts as a failure. GraphQL can answer with partial data, and a nulled `userContestRanking` would otherwise redraw a good card as "No contests yet". Measured 2026-09-25: real users with a badge, without one, with one contest and with none all came back with no `errors` key.
 - The env vars are prefixed `LEETCODE_` because Windows already sets `USERNAME` to the OS user.
+- Text floor: 10.5 px for every label since 1.2.0 (it reads at about 10.4 px in an 831 px README column). At 10.5 px with the 1.2 px tracking a label takes about 7.5 px per character; the `PEAK` placement uses that figure. Check a new label against the space it has.
 - The card is written without a trailing newline, like the brand renderer, and identical data gives identical bytes, so a quiet day leaves nothing to commit.
 
 ## Repo-specific rules
