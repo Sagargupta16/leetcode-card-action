@@ -96,5 +96,5 @@ uv run --no-project --with pytest==9.1.1 pytest -v
 
 ## Release
 
-- Releases: v1.0.0 (2026-09-25), v1.0.1 (2026-10-11). Listed on the Marketplace as "LeetCode Card".
+- Releases: v1.0.0 (2026-09-25), v1.0.1 (2026-10-11), v1.2.0 (2026-10-25, commit `b379afe`; it also shipped 1.0.2 and 1.1.0, which were never tagged). Listed on the Marketplace as "LeetCode Card".
 - A release is: merge the PR, tag `vX.Y.Z` on the merge commit, move the `v1` tag to it (`git tag -f -a v1 -m v1 <sha>`, `git push -f origin v1`), publish the GitHub release from the CHANGELOG entry, then re-pin `Sagargupta16/Sagargupta16/.github/workflows/render-svgs.yml`, which pins a full SHA, not `v1`.
