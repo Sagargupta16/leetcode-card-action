@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/Sagargupta16/orrery/main/skills/orrery/references/diagram.schema.json
+# Rendered with orrery (github.com/Sagargupta16/orrery):
+#   orrery render docs/diagrams/flow.yaml -o docs/diagrams/flow -f svg --theme both
+# Reviewed at README width: orrery review docs/diagrams/flow.yaml --width 880
+title: How one run works
+subtitle: One GraphQL query per run, no token. A failed fetch keeps the old cards, or fails if one is missing.
+direction: down
+layout: { spacing: compact }
+# The animation follows one good run, including the query to LeetCode and its answer.
+story: [trigger, script, leetcode, script, render, commit, repo]
+
+groups:
+  action: { type: box, label: "action.yml, composite", evidence: "action.yml:49#composite" }
+
+nodes:
+  trigger: { icon: tabler:clock, label: Daily schedule, note: or workflow_dispatch, evidence: "README.md:27#cron" }
+  leetcode: { icon: si:leetcode, label: LeetCode GraphQL, note: leetcode.com/graphql, evidence: "leetcode_card.py:103#GRAPHQL_URL" }
+  script: { icon: logos:python, label: leetcode_card.py, note: "Python 3.15, stdlib only", in: action, evidence: ["action.yml:54#3.15", "leetcode_card.py:616#main"] }
+  render: { icon: tabler:file-type-svg, label: Write the cards, note: one per output line, in: action, evidence: ["leetcode_card.py:660#render_card", "leetcode_card.py:664#set_outputs"] }
+  check: { shape: diamond, label: Every card exists?, in: action, align: script, evidence: "leetcode_card.py:646#missing" }
+  keep: { icon: tabler:history, label: Keep the old cards, note: "warning, exit 0", in: action, evidence: "leetcode_card.py:649#warning" }
+  fail: { icon: github:alert, label: Fail the step, note: "error, exit 1", in: action, evidence: "leetcode_card.py:654#error" }
+  commit: { icon: github:git-commit, label: Your commit step, note: only when the bytes changed, evidence: "README.md:48#diff" }
+  repo: { icon: github:repo, label: Your repo, note: serves the SVG, align: commit, evidence: "README.md:50#push" }
+
+edges:
+  - trigger -> script: "uses: @v1"
+  # Written from leetcode so layout puts LeetCode beside the schedule; the arrowhead is at
+  # LeetCode because the script sends the query (fetch, leetcode_card.py:133).
+  - { from: leetcode, to: script, label: one GraphQL POST, arrow: start }
+  - script -> render: fetch ok
+  - script -> check: fetch failed
+  - check -> keep: "yes"
+  - check -> fail: "no"
+  - render -> commit: git add
+  - commit -> repo: git push
