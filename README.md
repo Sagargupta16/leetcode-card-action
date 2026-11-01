@@ -153,17 +153,13 @@ The card adapts to your profile:
 
 ### Flow
 
-```mermaid
-flowchart LR
-    trigger["Your workflow<br/>(schedule or manual)"] --> action["action.yml<br/>composite, Python 3.13"]
-    action --> script["leetcode_card.py<br/>stdlib only"]
-    script -->|"one GraphQL POST"| api[("leetcode.com/graphql")]
-    api --> script
-    script -->|"ok"| render["parse_profile, then render_card<br/>once per output line and theme<br/>write SVGs, set outputs"]
-    script -->|"failed, every card exists"| keep["keep the old cards<br/>warning, exit 0"]
-    script -->|"failed, a card is missing"| fail["error, exit 1"]
-    render --> commit["your commit step<br/>commits only if bytes changed"]
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/flow-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="docs/diagrams/flow-light.svg">
+  <img width="880" src="docs/diagrams/flow-light.svg" alt="How one run works: a daily schedule, or workflow_dispatch, runs Sagargupta16/leetcode-card-action@v1. Inside action.yml, a composite action, leetcode_card.py runs on Python 3.15 with the standard library only and sends one GraphQL POST to leetcode.com/graphql, with no token. When the fetch works, it writes one card per output line; your commit step adds them with git add, commits only when the bytes changed, and pushes them with git push to your repo, which serves the SVG. When the fetch fails, the script checks whether every card already exists: if yes, it keeps the old cards, logs a warning and exits 0; if no, the step fails with an error and exit 1.">
+</picture>
+
+The spec behind the picture is [`docs/diagrams/flow.yaml`](docs/diagrams/flow.yaml), rendered with [orrery](https://github.com/Sagargupta16/orrery).
 
 ### Design decisions
 
