@@ -109,3 +109,27 @@ jobs:
                   sys.exit(f"{path}: background {fill}, label {label!r}")
               print(f"{path} parses: {label}")
           PY
+
+      - name: Run the action in the flat style with a phone card
+        uses: ./
+        with:
+          username: sagargupta1610
+          style: flat
+          output: |
+            assets/leetcode-flat.svg
+            assets/leetcode-mobile.svg?layout=phone
+
+      - name: Assert the flat card is 840 wide and the phone card 320
+        run: |
+          set -euo pipefail
+          python - assets/leetcode-flat.svg assets/leetcode-mobile.svg <<'PY'
+          import sys
+          from xml.dom import minidom
+
+          for path, width in zip(sys.argv[1:], ("840", "320"), strict=True):
+              root = minidom.parse(path).documentElement
+              svg = open(path, encoding="utf-8").read()
+              if root.getAttribute("width") != width or "Gradient" in svg:
+                  sys.exit(f"{path}: width {root.getAttribute('width')}, gradient {'Gradient' in svg}")
+              print(f"{path} parses at {width} px: {root.getAttribute('aria-label')}")
+          PY

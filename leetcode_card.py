@@ -23,6 +23,7 @@ import math
 import os
 import re
 import sys
+import unicodedata
 import urllib.request
 from html import escape
 from http.client import HTTPException
@@ -32,6 +33,12 @@ DEFAULT_OUTPUT = "assets/leetcode.svg"
 DEFAULT_THEME = "dark"
 DEFAULT_TITLE = "LEETCODE CONTEST RATING | {contests} CONTESTS"
 HEX_COLOR = re.compile(r"#(?:[0-9a-fA-F]{3}){1,2}")
+# classic is the card of 1.0 to 1.2; flat is the profile README's new look. A phone card is
+# always drawn flat, because there is no classic phone card.
+STYLES = ("classic", "flat")
+LAYOUTS = ("desktop", "phone")
+DEFAULT_STYLE = "classic"
+DEFAULT_LAYOUT = "desktop"
 
 # Named palettes. "ink" is the RGB that muted labels, gridlines and tracks are
 # drawn in at partial alpha; "text" is the solved count; "accent" is the default
@@ -561,30 +568,817 @@ def render_card(
     return "".join(parts)
 
 
-def parse_outputs(raw: str, default_theme: str) -> list[tuple[Path, str]]:
-    """One (path, theme) per non-empty line; a line may end in ?theme=<name> to override the theme."""
+# ---------------------------------------------------------------- flat style and phone layout
+# The new look of the profile README this card comes from (Sagargupta16/Sagargupta16: its
+# scripts/kit.py and the leetcode-mobile card in scripts/cards/stats.py). Panels are flat, one
+# fill and one hairline, with no gradient or glow; labels are mono micro-labels and figures
+# sans numerals; every loop lasts 2, 3, 4, 6, 12 or 24 s. Entrances are poster-safe: each
+# element's own attributes are its finished frame, and its animation holds the start value
+# from 0 s until its turn, so a still render (a link preview, a viewer without SMIL) shows
+# the whole card and a browser still plays the entrance.
+MICRO = 10.5  # the smallest label on the 840 px card
+MICRO_PHONE = 11.5  # the smallest label on the 320 px card, shown at about 309 px
+TRACK = 1.2  # letter-spacing of a mono label
+PAD = 24
+PHONE_W = 320
+PHONE_PAD = 18
+PHONE_COLUMN = PHONE_W - 2 * PHONE_PAD
+LOOPS = (2, 3, 4, 6, 12, 24)  # the only lengths a repeating animation has, in seconds
+CLOCK = 12  # the loop the heatmap's scan runs on
+ENTER = 0.4
+STAGGER = 0.08
+EASE = "0.16 1 0.3 1"  # ease-out for entrances
+DOT = chr(0xB7)  # the middle dot two facts are joined with
+MISSING = "-"
+FLAT_CSS = (
+    f".m{{font-family:{MONO};font-weight:700;letter-spacing:{TRACK}px}}"
+    f".c{{font-family:{MONO};font-weight:500}}"
+    f".n{{font-family:{SANS};font-weight:800;font-variant-numeric:tabular-nums}}"
+    f".b{{font-family:{SANS};font-weight:500}}"
+)
+# The 840 px card: a row of four tiles, then the rating panel beside the solved panel
+TILES_TOP = 46
+PANEL_H = 168
+CHART_PANEL_W = 520
+GAP = 12
+
+
+def on_every(color: str, surfaces: tuple[str, ...]) -> str:
+    """color raised by readable() until text in it reaches MIN_CONTRAST on each surface.
+
+    The surfaces of one theme are all dark or all light, so raising for one never lowers
+    the contrast on another.
+    """
+    for surface in surfaces:
+        color = readable(color, surface)
+    return color
+
+
+def muted_on(
+    ink: str, alpha: float, surfaces: tuple[str, ...], ratio: float = MIN_CONTRAST
+) -> str:
+    """The ink (an r,g,b triple) at alpha, raised in 0.01 steps until it reaches ratio on every surface."""
+    for a in (round(alpha + i / 100, 2) for i in range(101)):
+        color = f"rgba({ink},{a:g})"
+        if a >= 1 or all(contrast(color, s) >= ratio for s in surfaces):
+            return color
+    raise AssertionError("unreachable: alpha 1 always returns")
+
+
+def flat_palette(theme: str = DEFAULT_THEME, accent: str | None = None) -> dict:
+    """Every color the flat card paints, derived from the theme's four colors.
+
+    Hairlines, tracks and labels are the theme's ink at the profile kit's alphas; a tile is the
+    ink at 3% over the card, and the lead tile is the accent at 10%. Text colors are raised
+    until they reach MIN_CONTRAST on the card, a tile and the lead tile. The light that runs
+    the rating line is the accent halfway to the text color, so it shows on the line in
+    every theme.
+    """
+    t = THEMES[theme]
+    bg, ink = t["bg"], t["ink"]
+    tile = blend(f"rgba({ink},1)", bg, 0.03)
+    lit = blend(readable(accent or t["accent"], bg), bg, 0.10)
+    surfaces = (bg, tile, lit)
+    color = on_every(accent or t["accent"], surfaces)
+    text = on_every(t["text"], surfaces)
+    r, g, b, _ = parse_color(color)
+    return {
+        "bg": bg,
+        "tile": tile,
+        "lit": lit,
+        # the lead tile's outline: the kit's 0.55, or what reaches 3:1 (WCAG 1.4.11)
+        "lit_edge": muted_on(f"{r:g},{g:g},{b:g}", 0.55, (bg, lit), 3),
+        "frame": f"rgba({ink},0.09)",
+        "edge": f"rgba({ink},0.14)",
+        "accent": color,
+        "text": text,
+        "body": muted_on(ink, 0.78, surfaces),
+        "meta": muted_on(ink, 0.62, surfaces),
+        "light": blend(text, color, 0.5),
+        "heat": heat_colors(color, bg),
+    }
+
+
+def num(value: float) -> str:
+    """A coordinate to two places at most, with no trailing zeros and never "-0"."""
+    out = f"{value:.2f}".rstrip("0").rstrip(".")
+    return "0" if out in ("-0", "") else out
+
+
+def _advance(character: str) -> float:
+    """A sans glyph's advance in ems, measured conservatively (the profile kit's table)."""
+    if unicodedata.combining(character):
+        return 0
+    if unicodedata.east_asian_width(character) in {"W", "F"}:
+        return 1.05
+    if character in "W@%M":
+        return 1
+    if character in "ilI.,:;'!|`":
+        return 0.34
+    if character in " fjrt()[]":
+        return 0.44
+    return 0.7 if character.isupper() else 0.58
+
+
+def text_width(content: str, size: float, mono: bool = False) -> float:
+    """The width text takes: sans glyph advances, or monospace plus the label tracking."""
+    if mono:
+        return len(content) * (size * 0.6 + TRACK)
+    return sum(_advance(character) for character in content) * size
+
+
+def wrap(content: str, room: float, size: float, mono: bool = False) -> list[str]:
+    """Wrap words to a pixel width; a word wider than the line keeps a line of its own."""
+    lines, current = [], ""
+    for word in content.split():
+        candidate = f"{current} {word}" if current else word
+        if current and text_width(candidate, size, mono) > room:
+            lines.append(current)
+            candidate = word
+        current = candidate
+    return [*lines, current] if current else lines
+
+
+def _text(
+    x: float,
+    y: float,
+    content: object,
+    size: float,
+    fill: str,
+    cls: str = "m",
+    anchor: str = "",
+) -> str:
+    align = f' text-anchor="{anchor}"' if anchor else ""
+    return (
+        f'<text class="{cls}" x="{num(x)}" y="{num(y)}" font-size="{size:g}" fill="{fill}"{align}>'
+        f"{escape(str(content))}</text>"
+    )
+
+
+def _box(
+    x: float, y: float, w: float, h: float, fill: str, stroke: str = "", r: float = 10
+) -> str:
+    edge = f' stroke="{stroke}"' if stroke else ""
+    return (
+        f'<rect x="{num(x)}" y="{num(y)}" width="{num(w)}" height="{num(h)}" rx="{num(r)}" '
+        f'fill="{fill}"{edge}/>'
+    )
+
+
+def held(begin: float, dur: float) -> str:
+    """Timing that runs from 0 s and holds the start value until begin, then eases out."""
+    total = begin + dur
+    return (
+        f'keyTimes="0;{begin / total:.3f};1" dur="{total:.2f}s" fill="freeze" '
+        f'calcMode="spline" keySplines="0 0 1 1;{EASE}"'
+    )
+
+
+def enter(at: float, dur: float = ENTER, shift: str = "") -> str:
+    """A poster-safe entrance for the element it sits in: fade in, and rise from shift if given."""
+    times = held(at, dur)
+    out = f'<animate attributeName="opacity" values="0;0;1" {times}/>'
+    if shift:
+        out += f'<animateTransform attributeName="transform" type="translate" values="{shift};{shift};0 0" {times}/>'
+    return out
+
+
+def group(at: float, body: str, shift: str = "0 8") -> str:
+    """Wrap a block so it fades in and rises 8 px at `at`."""
+    return f"<g>{enter(at, shift=shift)}{body}</g>"
+
+
+def draw(d: str, at: float, dur: float, color: str, width: float) -> str:
+    """Draw a path in once; with pathLength 1 the dash is its full length, and it rests drawn."""
+    return (
+        f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{width:g}" stroke-linejoin="round" '
+        f'stroke-linecap="round" pathLength="1" stroke-dasharray="1" stroke-dashoffset="0">'
+        f'<animate attributeName="stroke-dashoffset" values="1;1;0" {held(at, dur)}/></path>'
+    )
+
+
+def light(
+    d: str,
+    length: float,
+    color: str,
+    begin: float = 2,
+    travel: float = 0.5,
+    width: float = 3,
+    dash: float = 8,
+    dur: float = 6,
+) -> str:
+    """A short light that runs path d (`length` px long) once a loop from `begin`, then rests hidden.
+
+    It parks a cap's width past either end, so a round cap never leaves a dot at rest.
+    `dash` is the light's share of the path in hundredths.
+    """
+    margin = 100 * (width / 2 + 1) / max(length, 1)
+    rest, gone = dash + margin, -(100 + margin)
+    return (
+        f'<path d="{d}" fill="none" stroke="{color}" stroke-width="{width:g}" stroke-linecap="round" '
+        f'pathLength="100" stroke-dasharray="{dash:g} {100 + dash + 2 * margin:.1f}" stroke-dashoffset="{rest:.1f}">'
+        f'<animate attributeName="stroke-dashoffset" values="{rest:.1f};{gone:.1f};{gone:.1f}" '
+        f'keyTimes="0;{travel:g};1" dur="{dur:g}s" begin="{begin:g}s" repeatCount="indefinite"/></path>'
+    )
+
+
+def live_dot(cx: float, cy: float, color: str, r: float = 3) -> str:
+    """A status point: a ring that widens and fades every 2 s around a steady dot."""
+    return (
+        f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" fill="none" stroke="{color}" stroke-width="1.5">'
+        f'<animate attributeName="r" values="{r:g};{r + 7:g}" dur="2s" repeatCount="indefinite"/>'
+        '<animate attributeName="opacity" values="0.9;0" dur="2s" repeatCount="indefinite"/></circle>'
+        f'<circle cx="{cx:g}" cy="{cy:g}" r="{r:g}" fill="{color}"/>'
+    )
+
+
+def rounded_rect_path(x: float, y: float, w: float, h: float, r: float) -> str:
+    """A rounded rectangle's outline as a path, for an outline that moves or scales."""
+    return (
+        f"M{num(x + r)} {num(y)}H{num(x + w - r)}A{num(r)} {num(r)} 0 0 1 {num(x + w)} {num(y + r)}"
+        f"V{num(y + h - r)}A{num(r)} {num(r)} 0 0 1 {num(x + w - r)} {num(y + h)}H{num(x + r)}"
+        f"A{num(r)} {num(r)} 0 0 1 {num(x)} {num(y + h - r)}V{num(y + r)}A{num(r)} {num(r)} 0 0 1 {num(x + r)} {num(y)}Z"
+    )
+
+
+def starts(count: int) -> list[float]:
+    """Entrance times for blocks in reading order: STAGGER apart from 0.1 s, all begun by 1.2 s."""
+    return [round(min(0.1 + index * STAGGER, 1.2), 2) for index in range(count)]
+
+
+def tile_figures(lc: dict) -> list[tuple[str, str]]:
+    """(value, label) for the four tiles, the lead figure first."""
+    rating, top = lc["rating"], lc["top"]
+    return [
+        (MISSING if rating is None else f"{rating:,}", "Contest rating"),
+        (MISSING if top is None else f"{top}%", "Top worldwide"),
+        (f"{lc['solved']:,}", "Problems solved"),
+        (f"{lc['contests']:,}", "Contests"),
+    ]
+
+
+def render_tiles(
+    x: float,
+    y: float,
+    width: float,
+    columns: int,
+    lc: dict,
+    pal: dict,
+    at: list[float],
+    phone: bool,
+) -> tuple[str, float]:
+    """The stat tiles, `columns` to a row: a numeral over a mono label that wraps by whole words.
+
+    The lead tile is tinted in the accent. Tiles hang from the top, so a row is as tall as
+    its tallest label. Returns (svg, the y under the last row).
+    """
+    items = tile_figures(lc)
+    gap = 10 if phone else GAP
+    tw = (width - gap * (columns - 1)) / columns
+    micro = MICRO_PHONE if phone else MICRO
+    inset, size = (12, 22) if phone else (14, 26)
+    value_y, label_y, pitch, foot = (30, 49, 14, 13) if phone else (38, 58, 13, 16)
+    labels = [
+        wrap(label.upper(), tw - 2 * inset + TRACK, micro, True) for _, label in items
+    ]
+    out = []
+    for row in range(0, len(items), columns):
+        cells = range(row, min(row + columns, len(items)))
+        th = max(label_y + (len(labels[i]) - 1) * pitch + foot for i in cells)
+        for i in cells:
+            tx = x + (i - row) * (tw + gap)
+            value = items[i][0]
+            fit = (
+                size  # a long figure steps the numeral down rather than leave its tile
+            )
+            while fit > 16 and text_width(value, fit) > tw - 2 * inset:
+                fit -= 1
+            fill, stroke = (
+                (pal["lit"], pal["lit_edge"]) if i == 0 else (pal["tile"], pal["edge"])
+            )
+            body = _box(tx, y, tw, th, fill, stroke) + _text(
+                tx + inset, y + value_y, value, fit, pal["text"], "n"
+            )
+            body += "".join(
+                _text(tx + inset, y + label_y + k * pitch, line, micro, pal["meta"])
+                for k, line in enumerate(labels[i])
+            )
+            out.append(group(at[i], body))
+        y += th + gap
+    return "".join(out), y - gap
+
+
+def render_difficulty(
+    x: float,
+    first: float,
+    width: float,
+    pitch: float,
+    lc: dict,
+    pal: dict,
+    at: float,
+    phone: bool,
+) -> tuple[str, float]:
+    """Easy, Medium and Hard: a mono label and the count over a bar that grows from its left end.
+
+    At rest each bar is its full length. Returns (svg, the y under the last bar).
+    """
+    micro = MICRO_PHONE if phone else MICRO
+    rows, y = [], first
+    for level, (done, total) in lc["by_difficulty"].items():
+        fill = width * min(done / total, 1) if total else 0
+        rows.append(
+            _text(x, y, level.upper(), micro, pal["accent"])
+            + _text(
+                x + width,
+                y,
+                f"{done:,} / {total:,}",
+                12.5 if phone else 12,
+                pal["body"],
+                "c",
+                "end",
+            )
+            + _box(x, y + 8, width, 6, pal["edge"], r=3)
+            + f'<g transform="translate({num(x)} {num(y + 8)})"><rect width="{fill:.1f}" height="6" rx="3" fill="{pal["accent"]}">'
+            + '<animateTransform attributeName="transform" type="scale" values="0 1;0 1;1 1" '
+            + f"{held(at + 0.2, 0.9)}/></rect></g>"
+        )
+        y += pitch
+    return group(at, "".join(rows)), y - pitch + 14
+
+
+def render_rating_line(
+    history: list[int],
+    box: tuple[float, float, float, float],
+    label_x: float,
+    pal: dict,
+    at: float,
+    phone: bool,
+) -> str:
+    """The contest rating line between gridlines at its high and low, drawn in once.
+
+    A light runs the line in 3 s of every 6 from 2 s. On a phone the latest point pulses
+    every 2 s, as on the profile's phone card; the 840 px card marks it with a steady dot
+    and rings the peak when the peak is an earlier contest.
+    """
+    left, right, upper, lower = box
+    low, high = min(history), max(history)
+    micro = MICRO_PHONE if phone else MICRO
+    out = []
+    for value, y in ((high, upper), (low, lower)):
+        out.append(_text(label_x, y + 4, round(value), micro, pal["meta"], "c"))
+        out.append(
+            f'<path d="M{num(left)} {num(y)}H{num(right)}" stroke="{pal["edge"]}"/>'
+        )
+    last = len(history) - 1
+    points = [
+        (
+            left + index * (right - left) / last,
+            lower - (value - low) / max(high - low, 1) * (lower - upper),
+        )
+        for index, value in enumerate(history)
+    ]
+    path = "".join(
+        f"{'M' if index == 0 else 'L'}{x:.1f} {y:.1f}"
+        for index, (x, y) in enumerate(points)
+    )
+    out.append(draw(path, at, 0.9, pal["accent"], 2))
+    length = sum(math.dist(a, b) for a, b in itertools.pairwise(points))
+    out.append(light(path, length, pal["light"]))
+    x, y = (round(v, 1) for v in points[-1])
+    if phone:
+        mark = live_dot(x, y, pal["accent"])
+    else:
+        mark = f'<circle cx="{x:g}" cy="{y:g}" r="3.5" fill="{pal["accent"]}"/>'
+        peak = history.index(high)
+        if peak != last:
+            px, py = (round(v, 1) for v in points[peak])
+            mark += (
+                f'<circle cx="{px:g}" cy="{py:g}" r="4" fill="none" '
+                f'stroke="{pal["accent"]}" stroke-width="1.5"/>'
+            )
+    out.append(f"<g>{enter(at + 0.9, 0.3)}{mark}</g>")
+    axis_y = lower + 20 if not phone else lower + 22
+    out.append(_text(left, axis_y, "CONTEST 1", micro, pal["meta"]))
+    out.append(
+        _text(right, axis_y, f"CONTEST {last + 1:,}", micro, pal["meta"], anchor="end")
+    )
+    return "".join(out)
+
+
+def climb(history: list[int]) -> str:
+    """The change from the first rated contest to the latest, which the tiles do not say."""
+    return f"{round(history[-1] - history[0]):+,} SINCE FIRST"
+
+
+def heat_weeks(act: dict, shown: int) -> list[list[int]]:
+    """The last `shown` week columns of the window, oldest first; the last one ends today."""
+    counts = act["counts"]
+    weeks = math.ceil(len(counts) / 7)
+    return [counts[7 * w : 7 * w + 7] for w in range(max(0, weeks - shown), weeks)]
+
+
+def render_flat_heatmap(
+    act: dict,
+    shown: int,
+    x: float,
+    top: float,
+    pitch: float,
+    cell: float,
+    pal: dict,
+    at: float,
+) -> tuple[str, str, float]:
+    """Daily submissions, a week to a column with Sunday on top: (defs, svg, height).
+
+    One clip that slides in reveals the grid left to right, so the grid is one animated
+    element and rests whole. Then a scan rests on this week and steps across the window
+    from the oldest week on the 12 s clock, and a ripple marks the busiest day every 2 s.
+    Shades step on the same log scale as the classic heatmap, over the whole year.
+    """
+    weeks = heat_weeks(act, shown)
+    peak = max(act["counts"], default=0)
+    height = 6 * pitch + cell
+    wide = (len(weeks) - 1) * pitch + cell
+    last = len(weeks) - 1
+    defs = (
+        f'<pattern id="day" x="{num(x)}" y="{num(top)}" width="{pitch:g}" height="{pitch:g}" patternUnits="userSpaceOnUse">'
+        f'<rect width="{cell:g}" height="{cell:g}" rx="2" fill="{pal["edge"]}"/></pattern>'
+        f'<clipPath id="weeks"><rect x="{num(x)}" y="{num(top)}" width="{num(wide)}" height="{num(height)}">'
+        f'<animateTransform attributeName="transform" type="translate" '
+        f'values="-{num(wide)} 0;-{num(wide)} 0;0 0" {held(at, 0.9)}/></rect></clipPath>'
+    )
+    cells = [
+        f'<rect x="{num(x)}" y="{num(top)}" width="{num(last * pitch)}" height="{num(height)}" fill="url(#day)"/>',
+        f'<rect x="{num(x + last * pitch)}" y="{num(top)}" width="{cell:g}" height="{num((len(weeks[-1]) - 1) * pitch + cell)}" fill="url(#day)"/>',
+    ]
+    for column, week in enumerate(weeks):
+        cells += [
+            f'<rect x="{num(x + column * pitch)}" y="{num(top + row * pitch)}" width="{cell:g}" '
+            f'height="{cell:g}" rx="2" class="l{heat_level(n, peak)}"/>'
+            for row, n in enumerate(week)
+            if n
+        ]
+    svg = f'<g clip-path="url(#weeks)">{"".join(cells)}</g>'
+    motion = ""
+    if last > 0:
+        # rests on this week, sweeps from the oldest at 2.4 s, one week a step, home by 11 s
+        step = min(0.45, 8.6 / last)
+        points = [(0.0, "0 0")] + [
+            (2.4 + column * step, f"{num((column - last) * pitch)} 0")
+            for column in range(last + 1)
+        ]
+        values = ";".join(value for _, value in points)
+        times = ";".join(f"{round(second / CLOCK, 4):g}" for second, _ in points)
+        outline = rounded_rect_path(
+            x + last * pitch - 2.5, top - 2.5, cell + 5, height + 5, 4
+        )
+        motion += (
+            f'<path d="{outline}" fill="none" stroke="{pal["accent"]}" stroke-width="1.5">'
+            f'<animateTransform attributeName="transform" type="translate" values="{values}" '
+            f'keyTimes="{times}" calcMode="discrete" dur="{CLOCK}s" repeatCount="indefinite"/></path>'
+        )
+    busy = [
+        (n, column, row)
+        for column, week in enumerate(weeks)
+        for row, n in enumerate(week)
+        if n
+    ]
+    if busy:
+        # the busiest day in the window: the latest one when two tie
+        _, column, row = max(busy)
+        cx, cy = x + column * pitch + cell / 2, top + row * pitch + cell / 2
+        half = cell / 2 + 1.5
+        ring = rounded_rect_path(-half, -half, 2 * half, 2 * half, 3)
+        motion += (
+            f'<g transform="translate({num(cx)} {num(cy)})"><path d="{ring}" fill="none" '
+            f'stroke="{pal["heat"][-1]}" stroke-width="1.5">'
+            '<animateTransform attributeName="transform" type="scale" values="1;1.9" dur="2s" repeatCount="indefinite"/>'
+            '<animate attributeName="opacity" values="0.9;0" dur="2s" repeatCount="indefinite"/></path></g>'
+        )
+    if motion:
+        svg += group(at + 0.9, motion, "")
+    return defs, svg, height
+
+
+def flat_card(w: int, h: float, label: str, pal: dict, defs: str, body: str) -> str:
+    """The svg root, the classes, the defs and the flat surface around the body."""
+    levels = ""
+    if 'class="l' in body:  # heatmap cells
+        levels = "".join(
+            f".l{n}{{fill:{color}}}" for n, color in enumerate(pal["heat"], start=1)
+        )
+    h = math.ceil(h)
+    return (
+        svg_open(w, h, label)
+        + f"<style>{FLAT_CSS}{levels}</style>"
+        + (f"<defs>{defs}</defs>" if defs else "")
+        + f'<rect x="0.5" y="0.5" width="{w - 1}" height="{h - 1}" rx="14" fill="{pal["bg"]}" stroke="{pal["frame"]}"/>'
+        + body
+        + SVG_CLOSE
+    )
+
+
+def render_flat_card(
+    lc: dict,
+    username: str,
+    title: str = DEFAULT_TITLE,
+    accent: str | None = None,
+    theme: str = DEFAULT_THEME,
+    today: dt.date | None = None,
+) -> str:
+    """The card in the flat style, 840 px wide.
+
+    The title opens the card with the badge as a chip beside it; four tiles carry the
+    rating, the top percentage, the solved count and the contests; the rating line and the
+    solved bars sit on panels under them, and a profile fetched with its calendar adds the
+    year's heatmap. With fewer than two rated contests the solved panel takes the full width.
+    """
+    pal = flat_palette(theme, accent)
+    act = None
+    if "calendar" in lc:
+        act = activity(lc["calendar"], today or dt.datetime.now(dt.UTC).date())
+    at = starts(8)
+    heading = title.replace("{contests}", str(lc["contests"]))
+    parts = [_text(PAD, 30, heading, MICRO, pal["accent"])]
+    if lc["badge"]:
+        badge = lc["badge"].upper()
+        chip_w = text_width(badge, MICRO, True) + 20 - TRACK
+        chip_x = W - PAD - chip_w
+        # a 22 px pill whose label sits on the title's baseline
+        chip_y = 30 - 11 - MICRO * 0.36
+        parts.append(
+            _box(chip_x, chip_y, chip_w, 22, pal["lit"], pal["lit_edge"], 11)
+            + _text(
+                chip_x + chip_w / 2,
+                30,
+                badge,
+                MICRO,
+                pal["accent"],
+                anchor="middle",
+            )
+        )
+    tiles, y = render_tiles(PAD, TILES_TOP, W - 2 * PAD, 4, lc, pal, at, False)
+    parts.append(tiles)
+    y += GAP
+    history = lc["history"]
+    solved_x, solved_w = PAD, W - 2 * PAD
+    if len(history) >= 2:
+        right = PAD + CHART_PANEL_W - 16
+        header = _text(
+            PAD + 16, y + 28, "CONTEST RATING", MICRO, pal["accent"]
+        ) + _text(
+            right,
+            y + 28,
+            f"PEAK {max(history):,}  |  {climb(history)}",
+            MICRO,
+            pal["meta"],
+            anchor="end",
+        )
+        box = (PAD + 56, right, y + 52, y + 132)
+        parts.append(
+            group(
+                at[4],
+                _box(PAD, y, CHART_PANEL_W, PANEL_H, pal["tile"], pal["edge"])
+                + header
+                + render_rating_line(history, box, PAD + 16, pal, at[4] + 0.2, False),
+            )
+        )
+        solved_x = PAD + CHART_PANEL_W + GAP
+        solved_w = W - PAD - solved_x
+    bars, _ = render_difficulty(
+        solved_x + 16, y + 62, solved_w - 32, 36, lc, pal, at[5], False
+    )
+    parts.append(
+        group(
+            at[5],
+            _box(solved_x, y, solved_w, PANEL_H, pal["tile"], pal["edge"])
+            + _text(
+                solved_x + 16, y + 28, "SOLVED BY DIFFICULTY", MICRO, pal["accent"]
+            ),
+        )
+        + bars
+    )
+    y += PANEL_H
+    defs = ""
+    if act:
+        y += 34
+        right = (
+            HEATMAP_X + HEATMAP_WEEKS * HEATMAP_PITCH - (HEATMAP_PITCH - HEATMAP_CELL)
+        )
+        stats = (
+            f"{plural(act['active'], 'ACTIVE DAY')}  |  MAX STREAK {act['streak']:,}"
+        )
+        labels = [
+            _text(
+                HEATMAP_X,
+                y,
+                f"{plural(act['total'], 'SUBMISSION')} IN THE PAST YEAR",
+                MICRO,
+                pal["accent"],
+            ),
+            _text(right, y, stats, MICRO, pal["meta"], anchor="end"),
+        ]
+        weeks = heat_weeks(act, HEATMAP_WEEKS)
+        last_label = -3
+        for week in range(len(weeks)):
+            days = (act["start"] + dt.timedelta(days=7 * week + d) for d in range(7))
+            month_start = next((day for day in days if day.day == 1), None)
+            if month_start and week - last_label >= 3:
+                labels.append(
+                    _text(
+                        HEATMAP_X + week * HEATMAP_PITCH,
+                        y + 20,
+                        MONTHS[month_start.month - 1],
+                        MICRO,
+                        pal["meta"],
+                    )
+                )
+                last_label = week
+        heat_defs, heat, height = render_flat_heatmap(
+            act,
+            HEATMAP_WEEKS,
+            HEATMAP_X,
+            y + 30,
+            HEATMAP_PITCH,
+            HEATMAP_CELL,
+            pal,
+            at[6] + 0.1,
+        )
+        defs += heat_defs
+        parts.append(group(at[6], "".join(labels)) + heat)
+        y += 30 + height
+    return flat_card(
+        W, y + PAD, aria_label(lc, username, act), pal, defs, "".join(parts)
+    )
+
+
+def render_phone_card(
+    lc: dict,
+    username: str,
+    accent: str | None = None,
+    theme: str = DEFAULT_THEME,
+    today: dt.date | None = None,
+) -> str:
+    """The 320 px phone card, a port of the profile README's leetcode-mobile card.
+
+    The badge opens it; four tiles sit two to a row, then the solved bars, the rating line
+    and, for a profile fetched with its calendar, the last 20 weeks of the heatmap with the
+    year's totals. It is always drawn in the flat style, and the title input is not used,
+    because the 840 px title does not fit a phone's width.
+    """
+    pal = flat_palette(theme, accent)
+    act = None
+    if "calendar" in lc:
+        act = activity(lc["calendar"], today or dt.datetime.now(dt.UTC).date())
+    at = starts(8)
+    badge = lc["badge"]
+    eyebrow = "LEETCODE" + (f"  |  {badge.upper()}" if badge else "")
+    parts = [_text(PHONE_PAD, 30, eyebrow, MICRO_PHONE, pal["accent"])]
+    tiles, y = render_tiles(PHONE_PAD, 44, PHONE_COLUMN, 2, lc, pal, at, True)
+    parts.append(tiles)
+    bars, y = render_difficulty(
+        PHONE_PAD, y + 26, PHONE_COLUMN, 38, lc, pal, at[4], True
+    )
+    parts.append(bars)
+    y -= 2  # the profile card steps on from 12 px under the last label
+    history = lc["history"]
+    if len(history) >= 2:
+        y += 34
+        top = y + 8
+        box = (PHONE_PAD + 40, PHONE_W - PHONE_PAD - 6, top + 8, top + 104)
+        parts.append(
+            group(
+                at[5],
+                _text(PHONE_PAD, y, "CONTEST RATING", MICRO_PHONE, pal["accent"])
+                + _text(
+                    PHONE_W - PHONE_PAD,
+                    y,
+                    climb(history),
+                    MICRO_PHONE,
+                    pal["meta"],
+                    anchor="end",
+                )
+                + render_rating_line(history, box, PHONE_PAD, pal, at[5] + 0.2, True),
+            )
+        )
+        y = top + 126
+    defs = ""
+    if act:
+        y += 30
+        weeks = heat_weeks(act, 20)
+        parts.append(
+            group(
+                at[6],
+                _text(
+                    PHONE_PAD, y, f"LAST {len(weeks)} WEEKS", MICRO_PHONE, pal["accent"]
+                )
+                + _text(
+                    PHONE_W - PHONE_PAD,
+                    y,
+                    "THIS WEEK",
+                    MICRO_PHONE,
+                    pal["meta"],
+                    anchor="end",
+                ),
+            )
+        )
+        heat_defs, heat, height = render_flat_heatmap(
+            act, 20, PHONE_PAD, y + 12, 14, 11, pal, at[6] + 0.1
+        )
+        defs += heat_defs
+        parts.append(heat)
+        y += 12 + height
+        # one fact group a line, each wrapped only if a large count needs it
+        facts = [
+            f"{plural(act['total'], 'SUBMISSION').lower()} in the past year",
+            f"{plural(act['active'], 'ACTIVE DAY').lower()} {DOT} longest streak {act['streak']:,}",
+        ]
+        lines = [part for fact in facts for part in wrap(fact, PHONE_COLUMN, 13.5)]
+        y += 10
+        parts.append(
+            group(
+                at[7],
+                "".join(
+                    _text(PHONE_PAD, y + 18 * (k + 1), text, 13.5, pal["body"], "b")
+                    for k, text in enumerate(lines)
+                ),
+            )
+        )
+        y += 18 * len(lines)
+    return flat_card(
+        PHONE_W, y + PHONE_PAD, aria_label(lc, username, act), pal, defs, "".join(parts)
+    )
+
+
+def render(
+    lc: dict,
+    username: str,
+    title: str = DEFAULT_TITLE,
+    accent: str | None = None,
+    theme: str = DEFAULT_THEME,
+    today: dt.date | None = None,
+    style: str = DEFAULT_STYLE,
+    layout: str = DEFAULT_LAYOUT,
+) -> str:
+    """The card for one output: render_card for classic, the flat card or the phone card."""
+    if layout == "phone":
+        return render_phone_card(lc, username, accent, theme, today)
+    if style == "flat":
+        return render_flat_card(lc, username, title, accent, theme, today)
+    return render_card(lc, username, title, accent, theme, today)
+
+
+def parse_output_options(
+    raw: str,
+    default_theme: str,
+    default_style: str = DEFAULT_STYLE,
+    default_layout: str = DEFAULT_LAYOUT,
+) -> list[tuple[Path, dict[str, str]]]:
+    """One (path, {theme, style, layout}) per non-empty line.
+
+    A line may end in ?key=value, several joined with &, to give that card its own theme,
+    style or layout; a line without one takes the defaults.
+    """
+    choices = {"theme": THEMES, "style": STYLES, "layout": LAYOUTS}
     outputs = []
     for line in raw.splitlines():
         path, _, query = line.strip().partition("?")
         path = path.rstrip()
         if not path:
             continue
-        theme = default_theme
-        if query:
-            key, _, value = query.partition("=")
-            if key != "theme":
+        options = {
+            "theme": default_theme,
+            "style": default_style,
+            "layout": default_layout,
+        }
+        for pair in query.split("&") if query else ():
+            key, _, value = pair.strip().partition("=")
+            if key not in options:
                 raise ValueError(
-                    f"unknown option {key!r} in output {line.strip()!r}, only theme= is supported"
+                    f"unknown option {key!r} in output {line.strip()!r}, pick theme=, style= or layout="
                 )
-            theme = value
-        if theme not in THEMES:
-            raise ValueError(
-                f"unknown theme {theme!r}, pick one of {', '.join(THEMES)}"
-            )
-        outputs.append((Path(path), theme))
+            options[key] = value
+        for key, allowed in choices.items():
+            if options[key] not in allowed:
+                raise ValueError(
+                    f"unknown {key} {options[key]!r}, pick one of {', '.join(allowed)}"
+                )
+        if options["layout"] == "phone":
+            options["style"] = "flat"  # there is no classic phone card
+        outputs.append((Path(path), options))
     if not outputs:
         raise ValueError("output is empty: give at least one path")
     return outputs
+
+
+def parse_outputs(raw: str, default_theme: str) -> list[tuple[Path, str]]:
+    """One (path, theme) per non-empty line; a line may end in ?theme=<name> to override the theme.
+
+    parse_output_options reads the style and layout options as well.
+    """
+    return [
+        (path, options["theme"])
+        for path, options in parse_output_options(raw, default_theme)
+    ]
 
 
 def annotate(level: str, message: str) -> None:
@@ -619,6 +1413,8 @@ def main() -> int:
     title = os.environ.get("LEETCODE_TITLE") or DEFAULT_TITLE
     theme = (os.environ.get("LEETCODE_THEME") or DEFAULT_THEME).strip()
     heatmap = (os.environ.get("LEETCODE_HEATMAP") or "false").strip().lower()
+    style = (os.environ.get("LEETCODE_STYLE") or DEFAULT_STYLE).strip()
+    layout = (os.environ.get("LEETCODE_LAYOUT") or DEFAULT_LAYOUT).strip()
     if not username:
         annotate(
             "error",
@@ -632,8 +1428,8 @@ def main() -> int:
         annotate("error", f"heatmap must be true or false, got {heatmap!r}")
         return 1
     try:
-        outputs = parse_outputs(
-            os.environ.get("LEETCODE_OUTPUT") or DEFAULT_OUTPUT, theme
+        outputs = parse_output_options(
+            os.environ.get("LEETCODE_OUTPUT") or DEFAULT_OUTPUT, theme, style, layout
         )
     except ValueError as exc:
         annotate("error", str(exc))
@@ -656,11 +1452,12 @@ def main() -> int:
         )
         return 1
     today = dt.datetime.now(dt.UTC).date()
-    for path, card_theme in outputs:
-        svg = render_card(lc, username, title, accent or None, card_theme, today)
+    for path, options in outputs:
+        svg = render(lc, username, title, accent or None, today=today, **options)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(svg, encoding="utf-8", newline="\n")
-        print(f"wrote {path} ({len(svg):,} bytes, theme {card_theme})")
+        shown = ", ".join(f"{key} {value}" for key, value in options.items())
+        print(f"wrote {path} ({len(svg):,} bytes, {shown})")
     set_outputs(lc)
     return 0
 

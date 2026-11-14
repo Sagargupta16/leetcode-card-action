@@ -12,7 +12,7 @@ CI (`.github/workflows/ci.yml`) runs three jobs on every push to `main` and ever
 
 - `lint`: `pip install --only-binary :all: ruff==0.17.1`, then `ruff check .` on Python 3.13
 - `test`: `pip install --only-binary :all: pytest==9.1.1`, then `pytest -v` on Python 3.12, 3.13 and 3.14
-- `action`: runs `action.yml` from the checkout against a live LeetCode profile, checks the SVG parses as an accessible `<svg role="img">`, and fails if any of the four outputs is empty, then runs it again with `heatmap: true` and a dark and light output pair and checks both cards
+- `action`: runs `action.yml` from the checkout against a live LeetCode profile, checks the SVG parses as an accessible `<svg role="img">`, and fails if any of the four outputs is empty, then runs it again with `heatmap: true` and a dark and light output pair and checks both cards, and a third time with `style: flat` and a phone line and checks the 840 and 320 widths
 
 Run the first two locally:
 
@@ -29,7 +29,7 @@ To render a card by hand:
 LEETCODE_USERNAME=<username> python leetcode_card.py
 ```
 
-That writes `assets/leetcode.svg`, which is gitignored. If your change alters the card, regenerate every README preview with `python scripts/render_examples.py`.
+That writes `assets/leetcode.svg`, which is gitignored. If your change alters the card, regenerate every README preview with `python scripts/render_examples.py`; a change to the flat style only re-renders its own previews with `--flat`. The classic card must stay byte for byte what 1.2.0 drew (a test pins its hashes).
 
 ## Conventions
 

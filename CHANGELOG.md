@@ -5,6 +5,23 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-11-14
+
+### Added
+
+- `style` input: `classic` (the default, the card of 1.0 to 1.2, unchanged byte for byte) or `flat`, the newer look of the profile README this card came from. Flat panels with one hairline border and no gradient, glow or CSS animation; four stat tiles (contest rating, top worldwide, problems solved, contests) with the badge as a chip beside the title; the rating line on its own panel with the peak and the climb since the first contest; the Easy/Medium/Hard bars beside it. Every entrance rests on the finished card, so a still image shows the line and the bars where the classic card showed empty axes, and every loop lasts 2, 6 or 12 seconds. 840 x 324, or 840 x 490 with the heatmap.
+- `layout` input: `desktop` (the default) or `phone`, a 320 px card ported from the profile's phone card: two tiles to a row, the bars, the rating line with its latest point pulsing, no label under 11.5 px, and with `heatmap: true` the last 20 weeks and the year's totals. A phone card is always flat and does not use `title`.
+- An `output` line takes `?style=` and `?layout=` as well as `?theme=`, joined with `&`, so one run and one fetch write the wide card and its phone twin (`assets/leetcode-mobile.svg?layout=phone`).
+- Every theme and `accent` work in the flat style: text reaches 4.5:1 on the card, a tile and the tinted lead tile, and the line, bars, heatmap shades and the lead tile's outline reach 3:1.
+- `examples/flat/` previews (wide and phone, with and without the heatmap, and the light theme), rendered from live data on 2026-11-14; `python scripts/render_examples.py --flat` re-renders only those.
+- CI runs the action a third time with `style: flat` and a phone line, and checks both widths.
+- Tests: the classic card's bytes against hashes of the 1.2.0 output, the flat and phone cards resting on their finished frame, loops on the 2, 3, 4, 6, 12 or 24 s clock, the text floor, no gradient or filter, the widths, contrast for every theme and accent, the heatmap cells and the new options: 325 tests, up from 183.
+
+### Changed
+
+- The error for an unknown `output` option names the three options (`theme=`, `style=`, `layout=`). `parse_outputs` keeps its signature and return value; `parse_output_options` returns every option.
+- The run log line now ends with the style and layout (`wrote <path> (N bytes, theme dark, style classic, layout desktop)`); the SVG bytes are unchanged.
+
 ## [1.2.0] - 2026-10-25
 
 ### Changed
@@ -66,6 +83,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fallback when LeetCode fails: the existing card is kept and the run warns. The step fails only when there is no card to keep yet.
 - CI: ruff, pytest on Python 3.12, 3.13 and 3.14, and a job that runs `action.yml` against a live profile.
 
+[1.3.0]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.3.0
+[1.2.0]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.2.0
 [1.1.0]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.1.0
 [1.0.2]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.0.2
 [1.0.1]: https://github.com/Sagargupta16/leetcode-card-action/releases/tag/v1.0.1
