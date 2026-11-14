@@ -11,7 +11,7 @@ Render your LeetCode contest rating as an animated SVG card that lives in your o
   <img src="examples/leetcode.svg" width="100%" alt="LeetCode card for sagargupta1610: Guardian, rating 2166, top 1.11%, 107 contests, 1330 solved" />
 </p>
 
-Your rating history draws itself in as a line with the peak marked, next to your badge, rating, top percentage, contest count, solved count and Easy/Medium/Hard progress bars. Turn on `heatmap` and a year of daily submissions sweeps in under it. Pick one of six themes, or have one run write a dark and a light card for a `<picture>` that follows the reader's GitHub theme. The previews are live data for [sagargupta1610](https://leetcode.com/u/sagargupta1610/), rendered 2026-10-18.
+Your rating history draws itself in as a line with the peak marked, next to your badge, rating, top percentage, contest count, solved count and Easy/Medium/Hard progress bars. Turn on `heatmap` and a year of daily submissions sweeps in under it. Pick one of six themes, or have one run write a dark and a light card for a `<picture>` that follows the reader's GitHub theme. Set `style: flat` for the [flat style](#flat-style-and-a-phone-card) with a 320 px phone card beside it. The previews are live data for [sagargupta1610](https://leetcode.com/u/sagargupta1610/), rendered 2026-10-18 (classic) and 2026-11-14 (flat).
 
 The card is a file in your repo, not an image served by a widget host, so there is no quota to run out and no third-party server to go down.
 
@@ -91,6 +91,51 @@ Commit both files (`git add assets/leetcode-dark.svg assets/leetcode-light.svg` 
 </a>
 ```
 
+## Flat style and a phone card
+
+`style: flat` draws the card in a newer look: flat panels with one hairline border and no gradient, four stat tiles, the rating line on its own panel beside the solved bars, and mono labels. Every entrance rests on the finished card, so a still image (a link preview, a viewer that does not animate SVG) shows every figure; in a browser the tiles rise in, the line draws itself, and a light runs along it every 6 seconds.
+
+<p align="center">
+  <img src="examples/flat/leetcode.svg" width="100%" alt="LeetCode card in the flat style for sagargupta1610: Guardian, rating 2166, top 1.12%, 107 contests, 1343 solved" />
+</p>
+
+`layout: phone`, or `?layout=phone` on one `output` line, writes a 320 px card for narrow screens: the same figures two tiles to a row, the solved bars and the rating line, with no label under 11.5 px. A phone card is always flat and leaves `title` out, because the 840 px heading does not fit its width. With `heatmap: true` it shows the last 20 weeks.
+
+<p align="center">
+  <img src="examples/flat/leetcode-mobile.svg" width="320" alt="LeetCode phone card in the flat style for sagargupta1610" />
+  <img src="examples/flat/heatmap-mobile.svg" width="320" alt="LeetCode phone card in the flat style with the last 20 weeks of submissions" />
+</p>
+
+One run writes both from one fetch:
+
+```yaml
+      - uses: Sagargupta16/leetcode-card-action@v1
+        with:
+          username: your-leetcode-username
+          style: flat
+          output: |
+            assets/leetcode.svg
+            assets/leetcode-mobile.svg?layout=phone
+```
+
+Commit both files, then let the README column pick one. GitHub's README column is under 630 px wide on screens narrower than 1012 px, where an 840 px card shrinks to three quarters of its size or less, so show the phone card there and the wide card above it:
+
+```html
+<a href="https://leetcode.com/u/your-leetcode-username/">
+  <picture>
+    <source media="(min-width: 1012px)" srcset="assets/leetcode.svg" />
+    <img src="assets/leetcode-mobile.svg" width="320" alt="LeetCode contest rating" />
+  </picture>
+</a>
+```
+
+Every theme and `accent` work in the flat style and go through the same contrast gate. The `light` theme and the heatmap:
+
+<p align="center">
+  <img src="examples/flat/light.svg" width="49%" alt="LeetCode card in the flat style and the light theme" />
+  <img src="examples/flat/heatmap.svg" width="49%" alt="LeetCode card in the flat style with the heatmap" />
+</p>
+
 ## Themes
 
 Every theme runs through the same contrast gate as the default: text reaches 4.5:1 on the theme's background, and the rating line, the bars and every heatmap shade reach 3:1. Shown here with `heatmap: true`.
@@ -118,8 +163,10 @@ Every theme runs through the same contrast gate as the default: text reaches 4.5
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
 | `username` | Yes | - | Your LeetCode username, as in `leetcode.com/u/<username>` |
-| `output` | No | `assets/leetcode.svg` | Where to write the SVG, relative to the repository root. One path per line writes one card per line from a single fetch; end a line with `?theme=<name>` to give that card its own theme |
+| `output` | No | `assets/leetcode.svg` | Where to write the SVG, relative to the repository root. One path per line writes one card per line from a single fetch; end a line with `?theme=<name>`, `?style=<name>` or `?layout=<name>` to give that card its own, and join several with `&` (`assets/m.svg?layout=phone&theme=light`) |
 | `theme` | No | `dark` | `dark`, `light`, `github-dark`, `github-light`, `dracula` or `nord`. Applies to every `output` line without its own `?theme=` |
+| `style` | No | `classic` | `classic`, the card of v1.0 to v1.2, or `flat`, the [flat style](#flat-style-and-a-phone-card). Applies to every `output` line without its own `?style=` |
+| `layout` | No | `desktop` | `desktop`, the 840 px card, or `phone`, a 320 px card for narrow screens, always in the flat style and without `title`. Applies to every `output` line without its own `?layout=` |
 | `heatmap` | No | `false` | `true` adds the past year of daily submissions under the card, with the year's submissions, active days and longest streak |
 | `accent` | No | the theme's | Accent color as `#rgb` or `#rrggbb`: the rating line, the badge line, the heading and the heatmap. A color that does not reach 4.5:1 on the card keeps its hue and is lightened on dark themes or darkened on light ones until it does. `dark` uses `#f59e0b` |
 | `title` | No | `LEETCODE CONTEST RATING \| {contests} CONTESTS` | Card heading. `{contests}` becomes the number of rated contests you attended |
@@ -149,7 +196,8 @@ The card adapts to your profile:
 - **Two or more rated contests:** the rating chart, with the peak ringed and labeled.
 - **Fewer than two:** a shorter card without the chart, since a line needs two points. The badge line reads "No contests yet" when there are none.
 - **No badge:** the badge line shows your rating instead.
-- **`heatmap: true`:** the card grows by a GitHub-style grid of the past 53 weeks, one column per week with Sunday on top, ending today (UTC). Shades step on a log scale, so one very busy day does not wash every other day out.
+- **`heatmap: true`:** the card grows by a GitHub-style grid of the past 53 weeks, one column per week with Sunday on top, ending today (UTC). Shades step on a log scale, so one very busy day does not wash every other day out. A phone card shows the last 20 weeks.
+- **`style: flat`:** with fewer than two rated contests the solved panel takes the full width, and the tiles read `-` for a rating or top percentage you do not have yet. The card rings the peak when an earlier contest was your best.
 
 ### Flow
 
@@ -177,7 +225,7 @@ The spec behind the picture is [`docs/diagrams/flow.yaml`](docs/diagrams/flow.ya
 - leetcode.com accounts only. leetcode.cn is a separate site with its own API.
 - The numbers are as fresh as your schedule: daily with the Quick start workflow.
 - With `heatmap: true` the grid moves forward every day, so expect one commit a day. Days are UTC, as LeetCode's own calendar counts them.
-- The card is 840 px wide and scales down with the page, so on a phone its smallest labels get small.
+- The 840 px card scales down with the page, so on a phone its smallest labels get small. Add a `layout: phone` card for narrow screens (see [Flat style and a phone card](#flat-style-and-a-phone-card)).
 - Fonts come from the viewer's system (JetBrains Mono or Consolas, Segoe UI or Inter or the system UI font), so text renders slightly differently across operating systems.
 - The action writes the file and nothing else. Committing it is up to your workflow, as in the Quick start.
 
@@ -189,7 +237,7 @@ The script runs on its own, outside Actions:
 LEETCODE_USERNAME=your-leetcode-username python leetcode_card.py
 ```
 
-That writes `assets/leetcode.svg` (gitignored). `LEETCODE_THEME`, `LEETCODE_HEATMAP`, `LEETCODE_ACCENT` and `LEETCODE_TITLE` set the other inputs. To re-render every preview in this README from one live fetch:
+That writes `assets/leetcode.svg` (gitignored). `LEETCODE_THEME`, `LEETCODE_STYLE`, `LEETCODE_LAYOUT`, `LEETCODE_HEATMAP`, `LEETCODE_ACCENT` and `LEETCODE_TITLE` set the other inputs. To re-render every preview in this README from one live fetch (`--flat` re-renders the flat previews only):
 
 ```bash
 python scripts/render_examples.py
@@ -202,7 +250,7 @@ uvx ruff@0.17.1 check .
 uv run --no-project --with pytest==9.1.1 pytest -v
 ```
 
-The tests never touch the network. CI also runs `action.yml` itself against a live profile and fails if the SVG does not parse or any output is empty, then runs it again with `heatmap: true` and a `github-dark`/`github-light` pair and checks both cards. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions.
+The tests never touch the network. CI also runs `action.yml` itself against a live profile and fails if the SVG does not parse or any output is empty, then runs it again with `heatmap: true` and a `github-dark`/`github-light` pair and checks both cards, and a third time with `style: flat` and a phone line. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions.
 
 ## License
 

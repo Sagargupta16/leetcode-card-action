@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import json
 import urllib.error
 from pathlib import Path
@@ -984,3 +985,414 @@ def test_failed_fetch_keeps_every_existing_output(
     monkeypatch.setattr(card, "fetch", offline)
 
     assert card.main() == 0
+
+
+# ---------------------------------------------------------------- classic stays as it was
+
+# sha256 of the cards the 1.2.0 code (origin/main 457a98d) renders for these inputs
+CLASSIC_SHA256 = {
+    "default": "762f1c0fa88aaa7a63136851a9219e901caa2ea6ba89b663407d579689e6d824",
+    "no-contests": "bc861abc7be3be787f0338ef1a2fbb1919ac1519ba15fefc9adb4835a3acd784",
+    "heatmap-light": "f2105b42186b24dd535d06a93a6c5a7ab49cf6249a0eba1630ecf17cca511392",
+}
+
+
+def classic_cards() -> dict[str, str]:
+    lc = dict(profile(), calendar={dt.date(2026, 10, 1): 3, dt.date(2026, 10, 2): 9})
+    return {
+        "default": card.render_card(profile(), "someone"),
+        "no-contests": card.render_card(NO_CONTESTS, "someone"),
+        "heatmap-light": card.render_card(
+            lc, "someone", accent="#1e3a8a", theme="light", today=TODAY
+        ),
+    }
+
+
+def test_classic_cards_are_byte_for_byte_the_1_2_cards() -> None:
+    assert {
+        name: hashlib.sha256(svg.encode()).hexdigest()
+        for name, svg in classic_cards().items()
+    } == CLASSIC_SHA256
+
+
+def test_render_defaults_to_the_classic_desktop_card() -> None:
+    lc = profile()
+
+    assert card.render(lc, "someone") == card.render_card(lc, "someone")
+    assert card.render(lc, "someone", style="classic", layout="desktop") == (
+        card.render_card(lc, "someone")
+    )
+
+
+def test_main_without_style_or_layout_writes_the_classic_card(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, _ = paths
+    for name in ("LEETCODE_STYLE", "LEETCODE_LAYOUT", "LEETCODE_THEME"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(card, "fetch", lambda url, body: graphql())
+    lc = card.parse_profile(json.loads(graphql()), "someone")
+
+    assert card.main() == 0
+    assert out.read_text(encoding="utf-8") == card.render_card(lc, "someone")
+
+
+# ---------------------------------------------------------------- flat style and phone layout
+
+FLAT_STATES = {
+    "chart": profile(),
+    "peak-left": profile(history=(1700, 1500, 1600)),
+    "one-contest": profile(history=(1475,), badge="", rating=1475),
+    "no-contests": NO_CONTESTS,
+    "heatmap": dict(
+        profile(),
+        calendar={TODAY - dt.timedelta(days=d): d % 6 for d in range(0, 400, 3)},
+    ),
+    "empty-year": dict(profile(), calendar={}),
+}
+
+
+def flat_cards() -> dict[str, str]:
+    cards = {}
+    for name, lc in FLAT_STATES.items():
+        cards[f"desktop-{name}"] = card.render_flat_card(lc, "someone", today=TODAY)
+        cards[f"phone-{name}"] = card.render_phone_card(lc, "someone", today=TODAY)
+    return cards
+
+
+FLAT_CARDS = flat_cards()
+LOOP_DURS = {f"{n}s" for n in card.LOOPS}
+
+
+def elements(root: minidom.Element) -> list[minidom.Element]:
+    return [root, *root.getElementsByTagName("*")]
+
+
+def animations(root: minidom.Element) -> list[minidom.Element]:
+    return [
+        el
+        for el in elements(root)
+        if el.tagName in {"animate", "animateTransform", "animateMotion", "set"}
+    ]
+
+
+@pytest.mark.parametrize("svg", FLAT_CARDS.values(), ids=FLAT_CARDS.keys())
+def test_flat_cards_are_valid_accessible_svgs(svg: str) -> None:
+    root = parse(svg)
+    width = "320" if root.getAttribute("width") == "320" else "840"
+
+    assert root.getAttribute("role") == "img"
+    assert root.getAttribute("aria-label").startswith("LeetCode someone: ")
+    assert root.getAttribute("viewBox") == f"0 0 {width} {root.getAttribute('height')}"
+
+
+def test_the_phone_card_is_320_wide_and_the_flat_card_840() -> None:
+    for name, svg in FLAT_CARDS.items():
+        assert parse(svg).getAttribute("width") == (
+            "320" if name.startswith("phone") else "840"
+        ), name
+
+
+@pytest.mark.parametrize("svg", FLAT_CARDS.values(), ids=FLAT_CARDS.keys())
+def test_flat_cards_rest_on_their_finished_frame(svg: str) -> None:
+    """A still render shows the whole card: no hidden element waits for a delayed begin."""
+    root = parse(svg)
+
+    assert not root.getElementsByTagName("set")
+    assert all(el.getAttribute("opacity") != "0" for el in elements(root))
+    for anim in animations(root):
+        if anim.getAttribute("fill") != "freeze":
+            continue
+        values = anim.getAttribute("values").split(";")
+        target = anim.parentNode
+        name = anim.getAttribute("attributeName")
+        # runs from 0 s holding its start value until its turn
+        assert not anim.getAttribute("begin")
+        assert anim.getAttribute("keyTimes").startswith("0;")
+        assert values[0] == values[1]
+        # and ends on the element's own attribute, its finished frame
+        if name == "transform":
+            assert not target.getAttribute("transform")
+            assert values[-1] in {"0 0", "1 1"}
+        else:
+            assert values[-1] == (target.getAttribute(name) or "1")
+
+
+def test_the_rating_line_and_the_bars_are_drawn_in_a_still_frame() -> None:
+    for layout in ("desktop", "phone"):
+        root = parse(FLAT_CARDS[f"{layout}-chart"])
+        line = next(
+            p
+            for p in root.getElementsByTagName("path")
+            if p.getAttribute("pathLength") == "1"
+        )
+        bars = [
+            r
+            for r in root.getElementsByTagName("rect")
+            # a bar sits at 0 0 in its own translated group; its track has an x
+            if r.getAttribute("height") == "6" and not r.getAttribute("x")
+        ]
+
+        assert line.getAttribute("stroke-dashoffset") == "0"
+        assert len(bars) == 3
+        assert all(float(b.getAttribute("width")) > 0 for b in bars)
+        assert not any(b.getAttribute("transform") for b in bars)
+
+
+@pytest.mark.parametrize("svg", FLAT_CARDS.values(), ids=FLAT_CARDS.keys())
+def test_flat_loops_run_on_the_page_clock(svg: str) -> None:
+    loops = [
+        a
+        for a in animations(parse(svg))
+        if a.getAttribute("repeatCount") == "indefinite"
+    ]
+
+    assert {a.getAttribute("dur") for a in loops} <= LOOP_DURS
+
+
+def test_every_flat_card_moves() -> None:
+    for name, svg in FLAT_CARDS.items():
+        if "no-contests" in name or "one-contest" in name:
+            continue
+        assert 'repeatCount="indefinite"' in svg, name
+
+
+@pytest.mark.parametrize("svg", FLAT_CARDS.values(), ids=FLAT_CARDS.keys())
+def test_flat_text_holds_the_floor(svg: str) -> None:
+    root = parse(svg)
+    floor = card.MICRO_PHONE if root.getAttribute("width") == "320" else card.MICRO
+    sizes = {
+        float(t.getAttribute("font-size")) for t in root.getElementsByTagName("text")
+    }
+
+    assert min(sizes) >= floor
+
+
+@pytest.mark.parametrize("svg", FLAT_CARDS.values(), ids=FLAT_CARDS.keys())
+def test_flat_cards_are_flat_and_self_contained(svg: str) -> None:
+    for banned in (
+        "Gradient",
+        "<filter",
+        "@keyframes",
+        "animation:",
+        "<script",
+        "href",
+        "@import",
+        "<image",
+    ):
+        assert banned not in svg
+
+
+def test_the_flat_desktop_card_has_no_pulsing_ring() -> None:
+    for name, svg in FLAT_CARDS.items():
+        if name.startswith("desktop"):
+            assert 'attributeName="r"' not in svg, name
+
+
+def test_the_phone_card_pulses_its_latest_point_like_the_profile() -> None:
+    assert 'attributeName="r" values="3;10" dur="2s"' in FLAT_CARDS["phone-chart"]
+
+
+def test_the_flat_card_rings_an_earlier_peak_only() -> None:
+    def rings(svg: str) -> int:
+        return sum(
+            1
+            for c in parse(svg).getElementsByTagName("circle")
+            if c.getAttribute("fill") == "none"
+        )
+
+    assert rings(FLAT_CARDS["desktop-peak-left"]) == 1
+    assert rings(card.render_flat_card(profile(history=(1500, 1700)), "someone")) == 0
+
+
+def test_flat_cards_show_the_figures_and_the_climb() -> None:
+    for layout in ("desktop", "phone"):
+        shown = texts(parse(FLAT_CARDS[f"{layout}-chart"]))
+
+        assert {"1,550", "22.95%", "120", "3"} <= set(shown)
+        assert "+50 SINCE FIRST" in " ".join(shown)
+        assert {"CONTEST 1", "CONTEST 3", "EASY", "MEDIUM", "HARD"} <= set(shown)
+
+
+def test_the_phone_card_wraps_tile_labels_by_whole_words() -> None:
+    shown = texts(parse(FLAT_CARDS["phone-chart"]))
+
+    assert "PROBLEMS" in shown
+    assert "SOLVED" in shown
+    assert "PROBLEMS SOLVED" not in shown
+
+
+def test_cards_without_contests_show_a_dash_and_no_rating_line() -> None:
+    for layout in ("desktop", "phone"):
+        root = parse(FLAT_CARDS[f"{layout}-no-contests"])
+
+        assert texts(root)[1:3] == ["-", "CONTEST RATING"]
+        assert not [
+            p for p in root.getElementsByTagName("path") if p.getAttribute("pathLength")
+        ]
+
+
+def test_flat_title_badge_and_username_are_escaped() -> None:
+    lc = profile(badge="<script>x</script>")
+
+    for svg in (
+        card.render_flat_card(lc, 'a"&<b>', title='<b>"R&D"</b> {contests}'),
+        card.render_phone_card(lc, 'a"&<b>'),
+    ):
+        root = parse(svg)
+        assert "<script>" not in svg
+        assert "<b>" not in svg
+        assert root.getAttribute("aria-label").startswith('LeetCode a"&<b>: ')
+    assert '<b>"R&D"</b> 3' in texts(
+        parse(card.render_flat_card(lc, "x", title='<b>"R&D"</b> {contests}'))
+    )
+
+
+def test_flat_cards_share_the_classic_alt_text() -> None:
+    lc = FLAT_STATES["heatmap"]
+    act = card.activity(lc["calendar"], TODAY)
+
+    for svg in (FLAT_CARDS["desktop-heatmap"], FLAT_CARDS["phone-heatmap"]):
+        assert parse(svg).getAttribute("aria-label") == card.aria_label(
+            lc, "someone", act
+        )
+
+
+def test_the_dark_flat_palette_is_the_profile_kit() -> None:
+    pal = card.flat_palette()
+
+    assert (pal["bg"], pal["accent"], pal["text"]) == ("#0b1012", "#f59e0b", "#f3f4f6")
+    assert (pal["meta"], pal["body"]) == (
+        "rgba(255,255,255,0.62)",
+        "rgba(255,255,255,0.78)",
+    )
+    assert (pal["frame"], pal["edge"], pal["lit_edge"]) == (
+        "rgba(255,255,255,0.09)",
+        "rgba(255,255,255,0.14)",
+        "rgba(245,158,11,0.55)",
+    )
+
+
+@pytest.mark.parametrize("theme", card.THEMES)
+@pytest.mark.parametrize("accent", [None, *ACCENTS])
+def test_every_flat_theme_reaches_wcag_contrast(theme: str, accent: str | None) -> None:
+    pal = card.flat_palette(theme, accent)
+    lc = FLAT_STATES["heatmap"]
+    surfaces = (pal["bg"], pal["tile"], pal["lit"])
+    for svg in (
+        card.render_flat_card(lc, "someone", accent=accent, theme=theme, today=TODAY),
+        card.render_phone_card(lc, "someone", accent=accent, theme=theme, today=TODAY),
+    ):
+        root = parse(svg)
+        fills = {t.getAttribute("fill") for t in root.getElementsByTagName("text")}
+        alpha = card.parse_color(pal["edge"])[3]
+        tracks = [card.blend(pal["edge"], s, alpha) for s in (pal["bg"], pal["tile"])]
+
+        # WCAG 1.4.3 for text on every surface it can sit on, 1.4.11 for the marks
+        assert {
+            (f, s): round(card.contrast(f, s), 2)
+            for f in fills
+            for s in surfaces
+            if card.contrast(f, s) < 4.5
+        } == {}
+        assert min(card.contrast(pal["accent"], s) for s in (*surfaces, *tracks)) >= 3
+        assert min(card.contrast(c, pal["bg"]) for c in pal["heat"]) >= 3
+        assert card.contrast(pal["lit_edge"], pal["bg"]) >= 3
+
+
+def test_the_flat_heatmap_draws_one_cell_per_active_day() -> None:
+    lc = FLAT_STATES["heatmap"]
+    act = card.activity(lc["calendar"], TODAY)
+    for layout, weeks in (("desktop", card.HEATMAP_WEEKS), ("phone", 20)):
+        root = parse(FLAT_CARDS[f"{layout}-heatmap"])
+        shown = sum(1 for week in card.heat_weeks(act, weeks) for n in week if n)
+
+        assert len(cells(root)) == shown
+    assert len(card.heat_weeks(act, 20)) == 20
+
+
+def test_an_empty_flat_year_still_draws_the_grid() -> None:
+    for layout in ("desktop", "phone"):
+        svg = FLAT_CARDS[f"{layout}-empty-year"]
+
+        assert 'fill="url(#day)"' in svg
+        assert not cells(parse(svg))
+
+
+# ---------------------------------------------------------------- style and layout options
+
+
+def test_each_output_line_can_pick_its_style_and_layout() -> None:
+    raw = "a.svg\nb.svg ?layout=phone&theme=light\nc.svg?style=classic\nd.svg?style=classic&layout=phone"
+
+    assert card.parse_output_options(raw, "nord", "flat") == [
+        (Path("a.svg"), {"theme": "nord", "style": "flat", "layout": "desktop"}),
+        (Path("b.svg"), {"theme": "light", "style": "flat", "layout": "phone"}),
+        (Path("c.svg"), {"theme": "nord", "style": "classic", "layout": "desktop"}),
+        # there is no classic phone card
+        (Path("d.svg"), {"theme": "nord", "style": "flat", "layout": "phone"}),
+    ]
+
+
+def test_parse_outputs_still_gives_path_and_theme() -> None:
+    assert card.parse_outputs("a.svg?layout=phone&theme=light", "dark") == [
+        (Path("a.svg"), "light")
+    ]
+
+
+@pytest.mark.parametrize(
+    ("raw", "style", "layout", "message"),
+    [
+        ("a.svg?style=neon", "classic", "desktop", "unknown style 'neon'"),
+        ("a.svg?layout=tablet", "classic", "desktop", "unknown layout 'tablet'"),
+        ("a.svg", "Flat", "desktop", "unknown style 'Flat'"),
+        ("a.svg", "classic", "mobile", "unknown layout 'mobile'"),
+        ("a.svg?theme=nord&size=2", "classic", "desktop", "unknown option 'size'"),
+    ],
+)
+def test_bad_styles_and_layouts_are_rejected(
+    raw: str, style: str, layout: str, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        card.parse_output_options(raw, "dark", style, layout)
+
+
+def test_main_writes_a_flat_card_and_its_phone_twin(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, _ = paths
+    phone = out.with_name("leetcode-mobile.svg")
+    monkeypatch.setenv("LEETCODE_STYLE", "flat")
+    monkeypatch.delenv("LEETCODE_LAYOUT", raising=False)
+    monkeypatch.setenv("LEETCODE_OUTPUT", f"{out}\n{phone}?layout=phone")
+    monkeypatch.setattr(card, "fetch", lambda url, body: graphql())
+    lc = card.parse_profile(json.loads(graphql()), "someone")
+
+    assert card.main() == 0
+    assert out.read_text(encoding="utf-8") == card.render_flat_card(lc, "someone")
+    assert phone.read_text(encoding="utf-8") == card.render_phone_card(lc, "someone")
+
+
+def test_the_layout_input_alone_writes_a_phone_card(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    out, _ = paths
+    monkeypatch.delenv("LEETCODE_STYLE", raising=False)
+    monkeypatch.setenv("LEETCODE_LAYOUT", "phone")
+    monkeypatch.setattr(card, "fetch", lambda url, body: graphql())
+
+    assert card.main() == 0
+    assert parse(out.read_text(encoding="utf-8")).getAttribute("width") == "320"
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [("LEETCODE_STYLE", "modern"), ("LEETCODE_LAYOUT", "tablet")],
+)
+def test_bad_style_or_layout_fails_before_fetching(
+    paths: tuple[Path, Path], monkeypatch: pytest.MonkeyPatch, name: str, value: str
+) -> None:
+    monkeypatch.setenv(name, value)
+    monkeypatch.setattr(card, "fetch", lambda url, body: pytest.fail("fetched"))
+
+    assert card.main() == 1

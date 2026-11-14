@@ -8,6 +8,9 @@ __pycache__/
 # A local run from the repo root writes the default output here
 /assets/
 
+# Local scratch: posters, renders and diffs that are never committed
+.scratch/
+
 # Editors and OS
 .vscode/
 .idea/
